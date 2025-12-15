@@ -5,26 +5,95 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>喵喵智能助手</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Zcool+KuaiLe&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Syntax Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-light.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="avatar">🐱</div>
-            <h1>喵喵智能助手</h1>
-            <p>我是你的可爱AI伙伴，喵~</p>
-        </header>
-        
-        <div class="chat-container" id="chatContainer">
-            <div class="message bot-message">
-                <div class="message-content">你好呀！我是喵喵，有什么可以帮你的吗？喵~</div>
-            </div>
-        </div>
+    <div id="app" class="app-wrapper">
 
-        <div class="input-area">
-            <input type="text" id="userInput" placeholder="和喵喵说点什么吧..." autocomplete="off">
-            <button id="sendBtn">发送 🐾</button>
-        </div>
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon">🐱</div>
+                <h2>喵喵助手</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <button @click="handleNewChat" :class="['nav-btn', {active: activeNav === 'newChat'}]">
+                    <i class="fas fa-plus"></i> 新建会话
+                </button>
+                <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
+                    <i class="fas fa-history"></i> 历史记录
+                </button>
+                <button @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
+                    <i class="fas fa-cog"></i> 设置
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <button @click="handleClearChat" class="danger-btn">
+                    <i class="fas fa-trash-alt"></i> 清空当前对话
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-content">
+            <header class="chat-header">
+                <div class="header-info">
+                    <div class="status-dot"></div>
+                    <span>喵喵在线中...</span>
+                </div>
+                <div class="header-actions">
+                    <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
+                </div>
+            </header>
+
+            <div class="chat-container" ref="chatContainer">
+                <div v-if="messages.length === 0" class="welcome-screen">
+                    <div class="big-avatar">🐱</div>
+                    <h3>你好呀！我是喵喵</h3>
+                    <p>我可以帮你写代码、回答问题，或者只是陪你聊天~ 喵！</p>
+                </div>
+                
+                <!-- Messages -->
+                <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
+                    <div class="message-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
+                </div>
+                
+                <!-- Loading Indicator -->
+                <div v-if="isLoading" class="typing-indicator">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+            </div>
+
+            <div class="input-area-wrapper">
+                <div class="input-area">
+                    <button class="attach-btn"><i class="fas fa-paperclip"></i></button>
+                    <textarea 
+                        v-model="userInput" 
+                        @keydown.enter.exact.prevent="handleSend"
+                        @input="autoResize"
+                        placeholder="和喵喵说点什么吧... (Shift+Enter 换行)" 
+                        rows="1"
+                        ref="textarea"
+                    ></textarea>
+                    <button @click="handleSend" class="send-btn">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="footer-text">AI 生成的内容可能包含错误，请仔细甄别。</div>
+            </div>
+        </main>
     </div>
 
     <script src="script.js"></script>

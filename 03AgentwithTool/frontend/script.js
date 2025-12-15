@@ -1,97 +1,147 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const chatContainer = document.getElementById('chatContainer');
-    const userInput = document.getElementById('userInput');
-    const sendBtn = document.getElementById('sendBtn');
+const { createApp } = Vue;
 
-    // API Endpoint - Adjust if your backend runs on a different port
-    const API_URL = 'http://localhost:8000/chat';
-
-    function addMessage(text, isUser = false) {
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message');
-        messageDiv.classList.add(isUser ? 'user-message' : 'bot-message');
-
-        const contentDiv = document.createElement('div');
-        contentDiv.classList.add('message-content');
-        
-        // Simple markdown parsing for code blocks if needed, or just text
-        // For now, we'll just set text content to avoid XSS, but handle newlines
-        contentDiv.innerText = text; 
-
-        messageDiv.appendChild(contentDiv);
-        chatContainer.appendChild(messageDiv);
-        scrollToBottom();
-    }
-
-    function showLoading() {
-        const loadingDiv = document.createElement('div');
-        loadingDiv.classList.add('typing-indicator');
-        loadingDiv.id = 'loadingIndicator';
-        
-        for (let i = 0; i < 3; i++) {
-            const dot = document.createElement('div');
-            dot.classList.add('dot');
-            loadingDiv.appendChild(dot);
-        }
-        
-        chatContainer.appendChild(loadingDiv);
-        scrollToBottom();
-    }
-
-    function removeLoading() {
-        const loadingDiv = document.getElementById('loadingIndicator');
-        if (loadingDiv) {
-            loadingDiv.remove();
-        }
-    }
-
-    function scrollToBottom() {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    async function handleSend() {
-        const text = userInput.value.trim();
-        if (!text) return;
-
-        // Add user message
-        addMessage(text, true);
-        userInput.value = '';
-        userInput.focus();
-
-        // Show loading
-        showLoading();
-
-        try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
+createApp({
+    data() {
+        return {
+            messages: [],
+            userInput: '',
+            isLoading: false,
+            activeNav: 'newChat',
+            API_URL: '/chat'
+        };
+    },
+    mounted() {
+        this.configureMarked();
+    },
+    methods: {
+        configureMarked() {
+            marked.setOptions({
+                highlight: function(code, lang) {
+                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                    return hljs.highlight(code, { language }).value;
                 },
-                body: JSON.stringify({ message: text }),
+                langPrefix: 'hljs language-',
+                breaks: true,
+                gfm: true
+            });
+        },
+        
+        parseMarkdown(text) {
+            return marked.parse(text);
+        },
+        
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+        
+        async handleSend() {
+            const text = this.userInput.trim();
+            if (!text || this.isLoading) return;
+
+            // Add user message
+            this.messages.push({
+                text: text,
+                isUser: true
+            });
+            
+            this.userInput = '';
+            this.$nextTick(() => {
+                this.resetTextareaHeight();
+                this.scrollToBottom();
             });
 
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
+            // Show loading
+            this.isLoading = true;
+
+            try {
+                const response = await fetch(this.API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: text }),
+                });
+
+                const contentType = response.headers.get('content-type') || '';
+                const isJson = contentType.includes('application/json');
+                const payload = isJson ? await response.json() : await response.text();
+
+                if (!response.ok) {
+                    const detail = isJson ? (payload.detail || JSON.stringify(payload)) : String(payload);
+                    throw new Error(`HTTP ${response.status}: ${detail}`);
+                }
+
+                const data = payload;
+                
+                // Add bot response
+                this.messages.push({
+                    text: data.response,
+                    isUser: false
+                });
+
+            } catch (error) {
+                console.error('Error:', error);
+                this.messages.push({
+                    text: `喵呜... 我这边遇到点问题：\n\n${String(error.message || error)}`,
+                    isUser: false
+                });
+            } finally {
+                this.isLoading = false;
+                this.$nextTick(() => {
+                    this.scrollToBottom();
+                });
             }
-
-            const data = await response.json();
-            
-            // Remove loading and add bot response
-            removeLoading();
-            addMessage(data.response);
-
-        } catch (error) {
-            console.error('Error:', error);
-            removeLoading();
-            addMessage('喵呜... 出错了，请稍后再试。 (Error connecting to server)');
+        },
+        
+        autoResize(event) {
+            const textarea = event.target;
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        },
+        
+        resetTextareaHeight() {
+            if (this.$refs.textarea) {
+                this.$refs.textarea.style.height = 'auto';
+            }
+        },
+        
+        scrollToBottom() {
+            if (this.$refs.chatContainer) {
+                this.$refs.chatContainer.scrollTop = this.$refs.chatContainer.scrollHeight;
+            }
+        },
+        
+        handleNewChat() {
+            this.messages = [];
+            this.activeNav = 'newChat';
+        },
+        
+        handleClearChat() {
+            if (confirm('确定要清空当前对话吗？喵？')) {
+                this.messages = [];
+            }
+        },
+        
+        handleHistory() {
+            alert('历史记录功能开发中... 喵！');
+            this.activeNav = 'history';
+        },
+        
+        handleSettings() {
+            alert('设置功能开发中... 喵！');
+            this.activeNav = 'settings';
+        }
+    },
+    watch: {
+        messages: {
+            handler() {
+                this.$nextTick(() => {
+                    this.scrollToBottom();
+                });
+            },
+            deep: true
         }
     }
-
-    sendBtn.addEventListener('click', handleSend);
-
-    userInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleSend();
-        }
-    });
-});
+}).mount('#app');

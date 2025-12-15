@@ -15,8 +15,7 @@ MODEL = os.getenv("MODEL")
 BASE_URL = os.getenv("BASE_URL")
 
 
-# If needed, wrap python functions as langchain tools
-# but in this project we'll pass the callables directly if supported.
+
 
 def create_agent_instance():
     model = init_chat_model(

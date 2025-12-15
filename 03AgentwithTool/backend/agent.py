@@ -3,6 +3,7 @@ import os
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.tools import tool as lc_tool
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 try:
     from .tools import get_current_weather
 except ImportError:
@@ -36,10 +37,29 @@ def create_agent_instance():
             "If you don't know the answer, admit it honestly."
         ),
     )
-    return agent
+    return agent, model
 
 
-agent = create_agent_instance()
+agent, model = create_agent_instance()
+
+MESSAGES = []
+
+def summarize_old_messages(model, messages: list) -> str:
+    """将旧消息总结为摘要"""
+    # 提取旧对话
+    old_conversation = "\n".join([
+        f"{'用户' if msg.type == 'human' else 'AI'}: {msg.content}"
+        for msg in messages
+    ])
+
+    # 生成摘要
+    summary_prompt = f"""请总结以下对话的关键信息：
+
+{old_conversation}
+总结（包含用户信息、重要事实、待办事项）："""
+
+    summary = model.invoke(summary_prompt).content
+    return summary
 
 
 def chat_with_agent(user_text: str):
@@ -47,19 +67,33 @@ def chat_with_agent(user_text: str):
 
     The wrapper is defensive about the agent return types.
     """
-    result = agent.invoke({"messages": [{"role": "user", "content": user_text}]})
+    global MESSAGES
+    if len(MESSAGES) > 50:
+        # 总结前 40 条消息
+        summary = summarize_old_messages(model, MESSAGES[:40])
 
+        # 用摘要替换旧消息
+        MESSAGES = [
+            SystemMessage(content=f"之前的对话摘要：\n{summary}")
+        ] + MESSAGES[40:]
+
+    MESSAGES.append(HumanMessage(content=user_text))
+    result = agent.invoke({"messages": MESSAGES})
+
+    response_content = ""
     # Many langchain agent variants return dict/objects; handle common cases
     if isinstance(result, dict):
         if "output" in result:
-            return result["output"]
-        if "messages" in result and result["messages"]:
+            response_content = result["output"]
+        elif "messages" in result and result["messages"]:
             msg = result["messages"][-1]
-            return getattr(msg, "content", str(msg))
-        return str(result)
-
-    # object with content
-    if hasattr(result, "content"):
-        return result.content
-
-    return str(result)
+            response_content = getattr(msg, "content", str(msg))
+        else:
+            response_content = str(result)
+    elif hasattr(result, "content"):
+        response_content = result.content
+    else:
+        response_content = str(result)
+    
+    MESSAGES.append(AIMessage(content=response_content))
+    return response_content

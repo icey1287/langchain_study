@@ -46,6 +46,83 @@
 
         <!-- Main Chat Area -->
         <main class="main-content">
+            <!-- Settings Panel -->
+            <div v-if="activeNav === 'settings'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-cog"></i> 文档管理</h2>
+                    <p>上传文档进行向量化处理，支持 PDF 和 Word 格式</p>
+                </div>
+
+                <div class="upload-section">
+                    <h3><i class="fas fa-upload"></i> 上传文档</h3>
+                    <div class="upload-area">
+                        <input 
+                            type="file" 
+                            ref="fileInput" 
+                            @change="handleFileSelect"
+                            accept=".pdf,.doc,.docx"
+                            style="display: none"
+                        />
+                        <button @click="$refs.fileInput.click()" class="upload-btn">
+                            <i class="fas fa-cloud-upload-alt"></i> 选择文件
+                        </button>
+                        <div v-if="selectedFile" class="selected-file">
+                            <i class="fas fa-file"></i> {{ selectedFile.name }}
+                            <button @click="uploadDocument" class="btn-primary" :disabled="isUploading">
+                                <i class="fas fa-upload"></i> {{ isUploading ? '上传中...' : '开始上传' }}
+                            </button>
+                        </div>
+                        <div v-if="uploadProgress" class="upload-progress">
+                            {{ uploadProgress }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="documents-section">
+                    <h3><i class="fas fa-list"></i> 已上传文档</h3>
+                    <button @click="loadDocuments" class="btn-secondary">
+                        <i class="fas fa-sync"></i> 刷新列表
+                    </button>
+                    
+                    <div v-if="documentsLoading" class="loading-indicator">
+                        加载中...
+                    </div>
+                    
+                    <div v-else-if="documents.length === 0" class="empty-documents">
+                        <i class="fas fa-inbox"></i>
+                        <p>暂无文档</p>
+                    </div>
+                    
+                    <div v-else class="documents-list">
+                        <div 
+                            v-for="doc in documents" 
+                            :key="doc.filename"
+                            class="document-item"
+                        >
+                            <div class="document-info">
+                                <div class="document-icon">
+                                    <i :class="getFileIcon(doc.file_type)"></i>
+                                </div>
+                                <div class="document-details">
+                                    <div class="document-name">{{ doc.filename }}</div>
+                                    <div class="document-meta">
+                                        <span>{{ doc.file_type }}</span>
+                                        <span>{{ doc.chunk_count }} 个文本片段</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button 
+                                @click="deleteDocument(doc.filename)" 
+                                class="btn-danger"
+                                title="删除文档"
+                            >
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- History Sidebar -->
             <div v-if="showHistorySidebar" class="history-sidebar">
                 <div class="history-header">
@@ -76,17 +153,19 @@
                 </div>
             </div>
 
-            <header class="chat-header">
-                <div class="header-info">
-                    <div class="status-dot"></div>
-                    <span>喵喵在线中...</span>
-                </div>
-                <div class="header-actions">
-                    <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
-                </div>
-            </header>
+            <!-- Chat Area (hidden when settings is active) -->
+            <div v-show="activeNav !== 'settings'" class="chat-area">
+                <header class="chat-header">
+                    <div class="header-info">
+                        <div class="status-dot"></div>
+                        <span>喵喵在线中...</span>
+                    </div>
+                    <div class="header-actions">
+                        <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
+                    </div>
+                </header>
 
-            <div class="chat-container" ref="chatContainer">
+                <div class="chat-container" ref="chatContainer">
                 <div v-if="messages.length === 0" class="welcome-screen">
                     <div class="big-avatar">🐱</div>
                     <h3>你好呀！我是喵喵</h3>
@@ -125,6 +204,8 @@
                 </div>
                 <div class="footer-text">AI 生成的内容可能包含错误，请仔细甄别。</div>
             </div>
+            </div>
+            <!-- End of Chat Area -->
         </main>
     </div>
 

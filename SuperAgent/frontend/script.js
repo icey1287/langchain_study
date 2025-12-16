@@ -12,7 +12,13 @@ createApp({
             sessionId: 'session_' + Date.now(),
             sessions: [],
             showHistorySidebar: false,
-            isComposing: false
+            isComposing: false,
+            // 文档管理相关
+            documents: [],
+            documentsLoading: false,
+            selectedFile: null,
+            isUploading: false,
+            uploadProgress: ''
         };
     },
     mounted() {
@@ -204,8 +210,119 @@ createApp({
         },
         
         handleSettings() {
-            alert('设置功能开发中... 喵！');
             this.activeNav = 'settings';
+            this.showHistorySidebar = false;
+            // 加载文档列表
+            this.loadDocuments();
+        },
+        
+        async loadDocuments() {
+            this.documentsLoading = true;
+            try {
+                const response = await fetch('/documents');
+                if (!response.ok) {
+                    throw new Error('Failed to load documents');
+                }
+                const data = await response.json();
+                this.documents = data.documents;
+            } catch (error) {
+                console.error('Error loading documents:', error);
+                alert('加载文档列表失败：' + error.message);
+            } finally {
+                this.documentsLoading = false;
+            }
+        },
+        
+        handleFileSelect(event) {
+            const files = event.target.files;
+            if (files && files.length > 0) {
+                this.selectedFile = files[0];
+                this.uploadProgress = '';
+            }
+        },
+        
+        async uploadDocument() {
+            if (!this.selectedFile) {
+                alert('请先选择文件');
+                return;
+            }
+            
+            this.isUploading = true;
+            this.uploadProgress = '正在上传...';
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', this.selectedFile);
+                
+                const response = await fetch('/documents/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Upload failed');
+                }
+                
+                const data = await response.json();
+                this.uploadProgress = data.message;
+                
+                // 清空选择
+                this.selectedFile = null;
+                if (this.$refs.fileInput) {
+                    this.$refs.fileInput.value = '';
+                }
+                
+                // 刷新文档列表
+                await this.loadDocuments();
+                
+                // 3秒后清除提示
+                setTimeout(() => {
+                    this.uploadProgress = '';
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Error uploading document:', error);
+                this.uploadProgress = '上传失败：' + error.message;
+            } finally {
+                this.isUploading = false;
+            }
+        },
+        
+        async deleteDocument(filename) {
+            if (!confirm(`确定要删除文档 "${filename}" 吗？这将同时删除 Milvus 中的所有相关向量。`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/documents/${encodeURIComponent(filename)}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Delete failed');
+                }
+                
+                const data = await response.json();
+                alert(data.message);
+                
+                // 刷新文档列表
+                await this.loadDocuments();
+                
+            } catch (error) {
+                console.error('Error deleting document:', error);
+                alert('删除文档失败：' + error.message);
+            }
+        },
+        
+        getFileIcon(fileType) {
+            if (fileType === 'PDF') {
+                return 'fas fa-file-pdf';
+            } else if (fileType === 'Word') {
+                return 'fas fa-file-word';
+            }
+            return 'fas fa-file';
         }
     },
     watch: {

@@ -8,4 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
-.env
+.env    
+
+#docker files
+volumes/

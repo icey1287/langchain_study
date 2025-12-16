@@ -20,8 +20,17 @@ BASE_URL = os.getenv("BASE_URL")
 class ConversationStorage:
     """对话存储"""
 
-    def __init__(self, storage_file: str = "customer_service_history.json"):
-        self.storage_file = storage_file
+    def __init__(self, storage_file: str = None):
+        # 如果外部指定路径，使用之；否则放到包内的 data/ 目录
+        if storage_file:
+            storage_path = os.path.abspath(storage_file)
+        else:
+            package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            data_dir = os.path.join(package_root, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            storage_path = os.path.join(data_dir, "customer_service_history.json")
+
+        self.storage_file = storage_path
 
     def save(self, user_id: str, session_id: str, messages: list, metadata: dict = None):
         """保存对话"""

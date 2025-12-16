@@ -3,7 +3,6 @@ import os
 import json
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
-from langchain_core.tools import tool as lc_tool
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 try:
     from .tools import get_current_weather
@@ -21,7 +20,6 @@ class ConversationStorage:
     """对话存储"""
 
     def __init__(self, storage_file: str = None):
-        # 如果外部指定路径，使用之；否则放到包内的 data/ 目录
         if storage_file:
             storage_path = os.path.abspath(storage_file)
         else:
@@ -39,7 +37,6 @@ class ConversationStorage:
         if user_id not in data:
             data[user_id] = {}
 
-        # 序列化消息
         serialized = []
         for msg in messages:
             serialized.append({
@@ -118,7 +115,6 @@ def create_agent_instance():
 
 agent, model = create_agent_instance()
 
-# 初始化对话存储
 storage = ConversationStorage()
 
 def summarize_old_messages(model, messages: list) -> str:
@@ -140,29 +136,20 @@ def summarize_old_messages(model, messages: list) -> str:
 
 
 def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
-    """Invoke the agent with a simple user message and return a string response.
-
-    The wrapper is defensive about the agent return types.
-    """
-    # 加载历史消息
+    """使用 Agent 处理用户消息并返回响应"""
     messages = storage.load(user_id, session_id)
     
-    # 如果消息过长，进行摘要
     if len(messages) > 50:
-        # 总结前 40 条消息
         summary = summarize_old_messages(model, messages[:40])
 
-        # 用摘要替换旧消息
         messages = [
             SystemMessage(content=f"之前的对话摘要：\n{summary}")
         ] + messages[40:]
 
-    # 添加新的用户消息
     messages.append(HumanMessage(content=user_text))
     result = agent.invoke({"messages": messages})
 
     response_content = ""
-    # Many langchain agent variants return dict/objects; handle common cases
     if isinstance(result, dict):
         if "output" in result:
             response_content = result["output"]
@@ -176,10 +163,7 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
     else:
         response_content = str(result)
     
-    # 添加 AI 回复
     messages.append(AIMessage(content=response_content))
-    
-    # 保存对话历史
     storage.save(user_id, session_id, messages)
     
     return response_content

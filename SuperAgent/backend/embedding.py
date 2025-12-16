@@ -45,25 +45,12 @@ def get_embedding(texts: list[str]) -> list[list[float]]:
     
     try:
         response = requests.post(BASE_URL + "/embeddings", headers=headers, json=data)
-        # 打印调试信息
-        if response.status_code != 200:
-            print(f"API 错误 {response.status_code}: {response.text}")
-        response.raise_for_status()  # 抛出 HTTP 错误（如 401 密钥错误、404 模型不存在）
+        response.raise_for_status()
         result = response.json()
-        # 提取向量（豆包 API 响应格式：{"data": [{"embedding": [0.1, 0.2, ...]}, ...]}）
         embeddings = [item["embedding"] for item in result["data"]]
-        
-        # 调试：打印第一个向量的维度
-        if embeddings and len(embeddings) > 0:
-            print(f"向量维度：{len(embeddings[0])}")
-        
         return embeddings
-    except requests.exceptions.HTTPError as e:
-        print(f"豆包嵌入 API 调用失败：{str(e)}")
-        raise
     except Exception as e:
-        print(f"豆包嵌入 API 调用失败：{str(e)}")
-        raise
+        raise Exception(f"嵌入 API 调用失败: {str(e)}")
 
 # -------------------------- 3. LangChain 处理文档（PDF + Word） --------------------------
 def load_documents(doc_folder: str) -> list[dict]:
@@ -87,8 +74,6 @@ def load_documents(doc_folder: str) -> list[dict]:
         else:
             continue
         
-        print(f"正在处理 {doc_type}：{file_path}")
-        
         # 加载并分段文档
         try:
             # 加载原始文档
@@ -106,11 +91,9 @@ def load_documents(doc_folder: str) -> list[dict]:
                     "page_number": doc.metadata.get("page", 0),
                     "chunk_idx": idx
                 })
-        except Exception as e:
-            print(f"处理 {doc_type} 失败（{file_path}）：{str(e)}")
+        except Exception:
             continue
     
-    print(f"\n共处理 {len(all_documents)} 个文本片段（来自 {doc_folder}）")
     return all_documents
 
 # -------------------------- 4. Milvus 初始化与写入（复用+适配） --------------------------
@@ -138,14 +121,10 @@ def init_milvus_collection():
             schema=schema,
             index_params=index_params
         )
-        print(f"创建 Milvus 集合：{MILVUS_COLLECTION}")
-    else:
-        print(f"Milvus 集合 {MILVUS_COLLECTION} 已存在")
 
 def write_docs_to_milvus(docs: list[dict], batch_size=50):
     """批量写入 Milvus"""
     if not docs:
-        print("无文本片段可写入")
         return
     
     total = len(docs)
@@ -168,21 +147,10 @@ def write_docs_to_milvus(docs: list[dict], batch_size=50):
                 "chunk_idx": doc["chunk_idx"]
             })
         # 写入 Milvus
-        res = milvus_client.insert(MILVUS_COLLECTION, insert_data)
-        processed = min(i+batch_size, total)
-        print(f"进度：{processed}/{total} | 本批写入 {res['insert_count']} 条")
+        milvus_client.insert(MILVUS_COLLECTION, insert_data)
 
-# -------------------------- 5. 主函数 --------------------------
 if __name__ == "__main__":
-    # 初始化 Milvus
     init_milvus_collection()
-    # 加载并处理文档（PDF + Word）
     docs = load_documents(PDF_FOLDER)
-    if not docs:
-        print("未找到任何文档")
-        exit()
-    # 写入 Milvus
-    write_docs_to_milvus(docs)
-    # 验证
-    stats = milvus_client.get_collection_stats(MILVUS_COLLECTION)
-    print(f"\n✅ 完成！集合统计：{stats}")
+    if docs:
+        write_docs_to_milvus(docs)

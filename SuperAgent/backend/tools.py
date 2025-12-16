@@ -10,10 +10,7 @@ AMAP_API_KEY = os.getenv("AMAP_API_KEY")
 
 
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
-    """Fetch weather from external API and format result.
-
-    This function is intentionally simple and returns a readable string.
-    """
+    """获取天气信息"""
     if not location:
         return "location参数不能为空"
     if extensions not in ("base", "all"):
@@ -51,7 +48,6 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
                 f"更新时间：{w.get('reporttime', '未知')}"
             )
 
-        # detailed forecast
         forecasts = data.get("forecasts", [])
         if not forecasts:
             return f"未查询到 {location} 的天气预报数据"

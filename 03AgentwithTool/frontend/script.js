@@ -7,11 +7,22 @@ createApp({
             userInput: '',
             isLoading: false,
             activeNav: 'newChat',
-            API_URL: '/chat'
+            API_URL: '/chat',
+            userId: 'user_' + Math.random().toString(36).substring(2, 11),
+            sessionId: 'session_' + Date.now(),
+            sessions: [],
+            showHistorySidebar: false
         };
     },
     mounted() {
         this.configureMarked();
+        // 尝试从 localStorage 恢复用户ID
+        const savedUserId = localStorage.getItem('userId');
+        if (savedUserId) {
+            this.userId = savedUserId;
+        } else {
+            localStorage.setItem('userId', this.userId);
+        }
     },
     methods: {
         configureMarked() {
@@ -61,7 +72,11 @@ createApp({
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ message: text }),
+                    body: JSON.stringify({ 
+                        message: text,
+                        user_id: this.userId,
+                        session_id: this.sessionId
+                    }),
                 });
 
                 const contentType = response.headers.get('content-type') || '';
@@ -115,7 +130,9 @@ createApp({
         
         handleNewChat() {
             this.messages = [];
+            this.sessionId = 'session_' + Date.now();
             this.activeNav = 'newChat';
+            this.showHistorySidebar = false;
         },
         
         handleClearChat() {
@@ -124,9 +141,49 @@ createApp({
             }
         },
         
-        handleHistory() {
-            alert('历史记录功能开发中... 喵！');
+        async handleHistory() {
             this.activeNav = 'history';
+            this.showHistorySidebar = true;
+            try {
+                const response = await fetch(`/sessions/${this.userId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load sessions');
+                }
+                const data = await response.json();
+                this.sessions = data.sessions;
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+                alert('加载历史记录失败：' + error.message);
+            }
+        },
+        
+        async loadSession(sessionId) {
+            this.sessionId = sessionId;
+            this.showHistorySidebar = false;
+            this.activeNav = 'newChat';
+            
+            // 从后端加载历史消息
+            try {
+                const response = await fetch(`/sessions/${this.userId}/${sessionId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load session messages');
+                }
+                const data = await response.json();
+                
+                // 转换消息格式并显示
+                this.messages = data.messages.map(msg => ({
+                    text: msg.content,
+                    isUser: msg.type === 'human'
+                }));
+                
+                this.$nextTick(() => {
+                    this.scrollToBottom();
+                });
+            } catch (error) {
+                console.error('Error loading session:', error);
+                alert('加载会话失败：' + error.message);
+                this.messages = [];
+            }
         },
         
         handleSettings() {

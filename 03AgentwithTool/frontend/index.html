@@ -46,6 +46,36 @@
 
         <!-- Main Chat Area -->
         <main class="main-content">
+            <!-- History Sidebar -->
+            <div v-if="showHistorySidebar" class="history-sidebar">
+                <div class="history-header">
+                    <h3>历史会话</h3>
+                    <button @click="showHistorySidebar = false" class="close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="history-list">
+                    <div v-if="sessions.length === 0" class="empty-history">
+                        <p>暂无历史记录</p>
+                    </div>
+                    <div 
+                        v-for="session in sessions" 
+                        :key="session.session_id"
+                        @click="loadSession(session.session_id)"
+                        class="history-item"
+                        :class="{active: session.session_id === sessionId}"
+                    >
+                        <div class="session-info">
+                            <div class="session-title">{{ session.session_id }}</div>
+                            <div class="session-meta">
+                                <span>{{ session.message_count }} 条消息</span>
+                                <span>{{ new Date(session.updated_at).toLocaleString() }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <header class="chat-header">
                 <div class="header-info">
                     <div class="status-dot"></div>

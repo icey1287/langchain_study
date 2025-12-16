@@ -111,7 +111,9 @@
                     <button class="attach-btn"><i class="fas fa-paperclip"></i></button>
                     <textarea 
                         v-model="userInput" 
-                        @keydown.enter.exact.prevent="handleSend"
+                        @keydown="handleKeyDown"
+                        @compositionstart="handleCompositionStart"
+                        @compositionend="handleCompositionEnd"
                         @input="autoResize"
                         placeholder="和喵喵说点什么吧... (Shift+Enter 换行)" 
                         rows="1"

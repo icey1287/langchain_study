@@ -11,7 +11,8 @@ createApp({
             userId: 'user_' + Math.random().toString(36).substring(2, 11),
             sessionId: 'session_' + Date.now(),
             sessions: [],
-            showHistorySidebar: false
+            showHistorySidebar: false,
+            isComposing: false
         };
     },
     mounted() {
@@ -47,9 +48,25 @@ createApp({
             return div.innerHTML;
         },
         
+        handleCompositionStart() {
+            this.isComposing = true;
+        },
+        
+        handleCompositionEnd() {
+            this.isComposing = false;
+        },
+        
+        handleKeyDown(event) {
+            // 如果是回车键且不是Shift+回车，且不在输入法组合中
+            if (event.key === 'Enter' && !event.shiftKey && !this.isComposing) {
+                event.preventDefault();
+                this.handleSend();
+            }
+        },
+        
         async handleSend() {
             const text = this.userInput.trim();
-            if (!text || this.isLoading) return;
+            if (!text || this.isLoading || this.isComposing) return;
 
             // Add user message
             this.messages.push({

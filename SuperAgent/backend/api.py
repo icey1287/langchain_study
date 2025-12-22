@@ -1,14 +1,53 @@
 import re
 import os
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
+
 try:
-    from .schemas import ChatRequest, ChatResponse, SessionListResponse, SessionInfo, SessionMessagesResponse, MessageInfo, DocumentListResponse, DocumentInfo, DocumentUploadResponse, DocumentDeleteResponse
+    from .schemas import (
+        ChatRequest,
+        ChatResponse,
+        SessionListResponse,
+        SessionInfo,
+        SessionMessagesResponse,
+        MessageInfo,
+        DocumentListResponse,
+        DocumentInfo,
+        DocumentUploadResponse,
+        DocumentDeleteResponse,
+    )
     from .agent import chat_with_agent, storage
-    from .embedding import init_milvus_collection, load_documents, write_docs_to_milvus, milvus_client, MILVUS_COLLECTION, PDF_FOLDER
+    from .document_loader import DocumentLoader
+    from .milvus_writer import MilvusWriter
+    from .milvus_client import MilvusManager
+    from .embedding import EmbeddingService
 except ImportError:
-    from schemas import ChatRequest, ChatResponse, SessionListResponse, SessionInfo, SessionMessagesResponse, MessageInfo, DocumentListResponse, DocumentInfo, DocumentUploadResponse, DocumentDeleteResponse
+    from schemas import (
+        ChatRequest,
+        ChatResponse,
+        SessionListResponse,
+        SessionInfo,
+        SessionMessagesResponse,
+        MessageInfo,
+        DocumentListResponse,
+        DocumentInfo,
+        DocumentUploadResponse,
+        DocumentDeleteResponse,
+    )
     from agent import chat_with_agent, storage
-    from embedding import init_milvus_collection, load_documents, write_docs_to_milvus, milvus_client, MILVUS_COLLECTION, PDF_FOLDER
+    from document_loader import DocumentLoader
+    from milvus_writer import MilvusWriter
+    from milvus_client import MilvusManager
+    from embedding import EmbeddingService
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR.parent / "data"
+UPLOAD_DIR = DATA_DIR / "documents"
+
+loader = DocumentLoader()
+milvus_manager = MilvusManager()
+embedding_service = EmbeddingService()
+milvus_writer = MilvusWriter(embedding_service=embedding_service, milvus_manager=milvus_manager)
 
 router = APIRouter()
 
@@ -86,15 +125,11 @@ async def chat_endpoint(request: ChatRequest):
 async def list_documents():
     """获取已上传的文档列表"""
     try:
-        # 确保 Milvus 集合已初始化
-        init_milvus_collection()
-        
-        # 从 Milvus 查询所有文档
-        results = milvus_client.query(
-            collection_name=MILVUS_COLLECTION,
-            filter="",
+        milvus_manager.init_collection()
+
+        results = milvus_manager.query(
             output_fields=["filename", "file_type"],
-            limit=10000
+            limit=10000,
         )
         
         # 按文件名分组统计
@@ -120,50 +155,39 @@ async def list_documents():
 async def upload_document(file: UploadFile = File(...)):
     """上传文档并进行embedding"""
     try:
-        # 检查文件类型
         filename = file.filename
         file_lower = filename.lower()
         if not (file_lower.endswith(".pdf") or file_lower.endswith((".docx", ".doc"))):
             raise HTTPException(status_code=400, detail="仅支持 PDF 和 Word 文档")
-        
-        # 确保 data 目录存在
-        os.makedirs(PDF_FOLDER, exist_ok=True)
-        
-        # 确保 Milvus 集合已初始化
-        init_milvus_collection()
-        
-        # 检查文件是否已存在，如果存在则先删除旧数据
+
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        milvus_manager.init_collection()
+
         delete_expr = f'filename == "{filename}"'
         try:
-            milvus_client.delete(
-                collection_name=MILVUS_COLLECTION,
-                filter=delete_expr
-            )
-        except:
-            pass  # 如果文件不存在，忽略错误
-        
-        # 保存文件到 data 目录
-        file_path = os.path.join(PDF_FOLDER, filename)
+            milvus_manager.delete(delete_expr)
+        except Exception:
+            pass
+
+        file_path = UPLOAD_DIR / filename
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
-        # 处理文档并生成 embedding
-        docs = load_documents(PDF_FOLDER)
-        
-        # 只处理新上传的文件
-        new_docs = [doc for doc in docs if doc["filename"] == filename]
-        
+
+        try:
+            new_docs = loader.load_document(str(file_path), filename)
+        except Exception as doc_err:
+            raise HTTPException(status_code=500, detail=f"文档处理失败: {doc_err}")
+
         if not new_docs:
             raise HTTPException(status_code=500, detail="文档处理失败，未能提取内容")
-        
-        # 写入 Milvus
-        write_docs_to_milvus(new_docs)
-        
+
+        milvus_writer.write_documents(new_docs)
+
         return DocumentUploadResponse(
             filename=filename,
             chunks_processed=len(new_docs),
-            message=f"成功上传并处理 {filename}，生成 {len(new_docs)} 个文本片段"
+            message=f"成功上传并处理 {filename}，生成 {len(new_docs)} 个文本片段",
         )
     except HTTPException:
         raise
@@ -175,20 +199,15 @@ async def upload_document(file: UploadFile = File(...)):
 async def delete_document(filename: str):
     """删除文档在 Milvus 中的向量（保留本地文件）"""
     try:
-        # 确保 Milvus 集合已初始化
-        init_milvus_collection()
-        
-        # 删除 Milvus 中的向量
+        milvus_manager.init_collection()
+
         delete_expr = f'filename == "{filename}"'
-        result = milvus_client.delete(
-            collection_name=MILVUS_COLLECTION,
-            filter=delete_expr
-        )
-        
+        result = milvus_manager.delete(delete_expr)
+
         return DocumentDeleteResponse(
             filename=filename,
             chunks_deleted=result.get("delete_count", 0) if isinstance(result, dict) else 0,
-            message=f"成功删除文档 {filename} 的向量数据（本地文件已保留）"
+            message=f"成功删除文档 {filename} 的向量数据（本地文件已保留）",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")

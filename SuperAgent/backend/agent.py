@@ -4,10 +4,15 @@ import json
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.tools import tool
 try:
     from .tools import get_current_weather
+    from .milvus_client import MilvusManager
+    from .embedding import EmbeddingService
 except ImportError:
     from tools import get_current_weather
+    from milvus_client import MilvusManager
+    from embedding import EmbeddingService
 from datetime import datetime
 
 load_dotenv()
@@ -100,13 +105,57 @@ def create_agent_instance():
         temperature=0.3,
     )
 
-    # create_agent expects callables or tool objects depending on langchain version
+    # 初始化混合检索依赖
+    embedding_service = EmbeddingService()
+    milvus_manager = MilvusManager()
+
+    @tool("search_knowledge_base")
+    def search_knowledge_base(query: str) -> str:
+        """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
+        try:
+            # 生成查询向量
+            dense_embeddings = embedding_service.get_embeddings([query])
+            dense_embedding = dense_embeddings[0]
+            sparse_embedding = embedding_service.get_sparse_embedding(query)
+            
+            # 混合检索
+            results = milvus_manager.hybrid_retrieve(
+                dense_embedding=dense_embedding,
+                sparse_embedding=sparse_embedding,
+                top_k=5
+            )
+        except Exception as e:
+            # 降级到仅密集向量检索
+            try:
+                dense_embeddings = embedding_service.get_embeddings([query])
+                dense_embedding = dense_embeddings[0]
+                results = milvus_manager.dense_retrieve(
+                    dense_embedding=dense_embedding,
+                    top_k=5
+                )
+            except Exception:
+                return "Knowledge base is currently unavailable."
+        
+        if not results:
+            return "No relevant documents found in the knowledge base."
+        
+        # 格式化返回结果
+        formatted = []
+        for i, result in enumerate(results, 1):
+            source = result.get("filename", "Unknown")
+            page = result.get("page_number", "N/A")
+            text = result.get("text", "")
+            formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
+        
+        return "\n\n---\n\n".join(formatted)
+
     agent = create_agent(
         model=model,
-        tools=[get_current_weather],
+        tools=[get_current_weather, search_knowledge_base],
         system_prompt=(
             "You are a cute cat bot that loves to help users. "
             "When responding, you may use tools to assist. "
+            "Use the search_knowledge_base tool when users ask questions that might be in uploaded documents. "
             "If you don't know the answer, admit it honestly."
         ),
     )

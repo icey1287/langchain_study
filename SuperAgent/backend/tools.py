@@ -2,11 +2,23 @@ from typing import Optional
 import os
 import requests
 from dotenv import load_dotenv
+try:
+    from .milvus_client import MilvusManager
+    from .embedding import EmbeddingService
+    from langchain_core.tools import tool
+except ImportError:
+    from milvus_client import MilvusManager
+    from embedding import EmbeddingService
+    from langchain_core.tools import tool
 
 load_dotenv()
 
 AMAP_WEATHER_API = os.getenv("AMAP_WEATHER_API")
 AMAP_API_KEY = os.getenv("AMAP_API_KEY")
+
+# 全局初始化检索依赖，避免反复构造
+_embedding_service = EmbeddingService()
+_milvus_manager = MilvusManager()
 
 
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
@@ -68,3 +80,41 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
         return f"错误：天气服务请求失败 - {e}"
     except Exception as e:
         return f"错误：解析天气数据失败 - {e}"
+
+
+@tool("search_knowledge_base")
+def search_knowledge_base(query: str) -> str:
+    """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
+    try:
+        dense_embeddings = _embedding_service.get_embeddings([query])
+        dense_embedding = dense_embeddings[0]
+        sparse_embedding = _embedding_service.get_sparse_embedding(query)
+
+        results = _milvus_manager.hybrid_retrieve(
+            dense_embedding=dense_embedding,
+            sparse_embedding=sparse_embedding,
+            top_k=5,
+        )
+    except Exception:
+        # 降级到仅密集向量检索
+        try:
+            dense_embeddings = _embedding_service.get_embeddings([query])
+            dense_embedding = dense_embeddings[0]
+            results = _milvus_manager.dense_retrieve(
+                dense_embedding=dense_embedding,
+                top_k=5,
+            )
+        except Exception:
+            return "Knowledge base is currently unavailable."
+
+    if not results:
+        return "No relevant documents found in the knowledge base."
+
+    formatted = []
+    for i, result in enumerate(results, 1):
+        source = result.get("filename", "Unknown")
+        page = result.get("page_number", "N/A")
+        text = result.get("text", "")
+        formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
+
+    return "\n\n---\n\n".join(formatted)

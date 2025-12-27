@@ -11,6 +11,7 @@ try:
         SessionInfo,
         SessionMessagesResponse,
         MessageInfo,
+        SessionDeleteResponse,
         DocumentListResponse,
         DocumentInfo,
         DocumentUploadResponse,
@@ -29,6 +30,7 @@ except ImportError:
         SessionInfo,
         SessionMessagesResponse,
         MessageInfo,
+        SessionDeleteResponse,
         DocumentListResponse,
         DocumentInfo,
         DocumentUploadResponse,
@@ -93,6 +95,20 @@ async def list_sessions(user_id: str):
         # 按更新时间倒序排列
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sessions/{user_id}/{session_id}", response_model=SessionDeleteResponse)
+async def delete_session(user_id: str, session_id: str):
+    """删除指定会话"""
+    try:
+        deleted = storage.delete_session(user_id, session_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return SessionDeleteResponse(session_id=session_id, message="成功删除会话")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

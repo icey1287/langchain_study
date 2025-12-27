@@ -527,6 +527,9 @@ textarea {
     cursor: pointer;
     transition: var(--transition);
     border: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .history-item:hover {
@@ -564,6 +567,30 @@ textarea {
 
 .history-item.active .session-meta {
     color: rgba(255, 255, 255, 0.8);
+}
+
+.session-body {
+    flex: 1;
+}
+
+.history-delete-btn {
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 10px;
+    transition: var(--transition);
+}
+
+.history-delete-btn:hover {
+    background-color: rgba(255, 107, 107, 0.1);
+    color: #ff6b6b;
+}
+
+.history-item.active .history-delete-btn {
+    color: var(--white);
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
 /* Settings Panel */

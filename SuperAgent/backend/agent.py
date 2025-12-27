@@ -4,15 +4,10 @@ import json
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.tools import tool
 try:
-    from .tools import get_current_weather
-    from .milvus_client import MilvusManager
-    from .embedding import EmbeddingService
+    from .tools import get_current_weather, search_knowledge_base
 except ImportError:
-    from tools import get_current_weather
-    from milvus_client import MilvusManager
-    from embedding import EmbeddingService
+    from tools import get_current_weather, search_knowledge_base
 from datetime import datetime
 
 load_dotenv()
@@ -84,6 +79,20 @@ class ConversationStorage:
             return []
         return list(data[user_id].keys())
 
+    def delete_session(self, user_id: str, session_id: str) -> bool:
+        """删除指定用户的会话，返回是否删除成功"""
+        data = self._load()
+        if user_id not in data or session_id not in data[user_id]:
+            return False
+
+        del data[user_id][session_id]
+        if not data[user_id]:
+            del data[user_id]
+
+        with open(self.storage_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+
     def _load(self) -> dict:
         """加载数据"""
         if not os.path.exists(self.storage_file):
@@ -104,50 +113,6 @@ def create_agent_instance():
         base_url=BASE_URL,
         temperature=0.3,
     )
-
-    # 初始化混合检索依赖
-    embedding_service = EmbeddingService()
-    milvus_manager = MilvusManager()
-
-    @tool("search_knowledge_base")
-    def search_knowledge_base(query: str) -> str:
-        """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
-        try:
-            # 生成查询向量
-            dense_embeddings = embedding_service.get_embeddings([query])
-            dense_embedding = dense_embeddings[0]
-            sparse_embedding = embedding_service.get_sparse_embedding(query)
-            
-            # 混合检索
-            results = milvus_manager.hybrid_retrieve(
-                dense_embedding=dense_embedding,
-                sparse_embedding=sparse_embedding,
-                top_k=5
-            )
-        except Exception as e:
-            # 降级到仅密集向量检索
-            try:
-                dense_embeddings = embedding_service.get_embeddings([query])
-                dense_embedding = dense_embeddings[0]
-                results = milvus_manager.dense_retrieve(
-                    dense_embedding=dense_embedding,
-                    top_k=5
-                )
-            except Exception:
-                return "Knowledge base is currently unavailable."
-        
-        if not results:
-            return "No relevant documents found in the knowledge base."
-        
-        # 格式化返回结果
-        formatted = []
-        for i, result in enumerate(results, 1):
-            source = result.get("filename", "Unknown")
-            page = result.get("page_number", "N/A")
-            text = result.get("text", "")
-            formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
-        
-        return "\n\n---\n\n".join(formatted)
 
     agent = create_agent(
         model=model,

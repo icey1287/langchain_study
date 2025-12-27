@@ -138,17 +138,25 @@
                     <div 
                         v-for="session in sessions" 
                         :key="session.session_id"
-                        @click="loadSession(session.session_id)"
                         class="history-item"
                         :class="{active: session.session_id === sessionId}"
                     >
-                        <div class="session-info">
-                            <div class="session-title">{{ session.session_id }}</div>
-                            <div class="session-meta">
-                                <span>{{ session.message_count }} 条消息</span>
-                                <span>{{ new Date(session.updated_at).toLocaleString() }}</span>
+                        <div class="session-body" @click="loadSession(session.session_id)">
+                            <div class="session-info">
+                                <div class="session-title">{{ session.session_id }}</div>
+                                <div class="session-meta">
+                                    <span>{{ session.message_count }} 条消息</span>
+                                    <span>{{ new Date(session.updated_at).toLocaleString() }}</span>
+                                </div>
                             </div>
                         </div>
+                        <button 
+                            class="history-delete-btn"
+                            title="删除会话"
+                            @click.stop="deleteSession(session.session_id)"
+                        >
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
                 </div>
             </div>

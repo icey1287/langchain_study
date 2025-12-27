@@ -208,6 +208,38 @@ createApp({
                 this.messages = [];
             }
         },
+
+        async deleteSession(sessionId) {
+            if (!confirm(`确定要删除会话 "${sessionId}" 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/sessions/${this.userId}/${sessionId}`, {
+                    method: 'DELETE'
+                });
+
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Delete failed');
+                }
+
+                this.sessions = this.sessions.filter(s => s.session_id !== sessionId);
+
+                if (this.sessionId === sessionId) {
+                    this.messages = [];
+                    this.sessionId = 'session_' + Date.now();
+                    this.activeNav = 'newChat';
+                }
+
+                if (payload.message) {
+                    alert(payload.message);
+                }
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                alert('删除会话失败：' + error.message);
+            }
+        },
         
         handleSettings() {
             this.activeNav = 'settings';

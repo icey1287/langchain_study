@@ -32,6 +32,11 @@ class SessionListResponse(BaseModel):
     sessions: List[SessionInfo]
 
 
+class SessionDeleteResponse(BaseModel):
+    session_id: str
+    message: str
+
+
 class DocumentInfo(BaseModel):
     filename: str
     file_type: str

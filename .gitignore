@@ -12,3 +12,6 @@ wheels/
 
 #docker files
 volumes/
+
+# OS files
+.DS_Store

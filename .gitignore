@@ -15,3 +15,5 @@ volumes/
 
 # OS files
 .DS_Store
+
+SuperAgent/data

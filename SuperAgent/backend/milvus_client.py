@@ -81,7 +81,7 @@ class MilvusManager:
         dense_embedding: list[float],
         sparse_embedding: dict,
         top_k: int = 5,
-        rrf_k: int = 60
+        rrf_k: int = 60     #可调节
     ) -> list[dict]:
         """
         混合检索 - 使用 RRF 融合密集向量和稀疏向量的检索结果

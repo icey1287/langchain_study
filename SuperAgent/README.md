@@ -1,14 +1,34 @@
 # SuperAgent 项目说明
 
-面向 Agent 开发求职场景的项目记录，方便后续持续更新与展示。
+Agent的项目记录，方便后续持续更新与展示。
 
 ## 项目概览
-- **定位**：一只“喵喵助手”Agent，兼具聊天、工具调用和知识库问答。
 - **核心能力**：
-  - LangChain Agent（OpenAI API 兼容接口）+ 自定义工具。
+  - LangChain Agent + 自定义工具。
   - 文档上传、切分、向量化后写入 Milvus，支持混合检索（稠密+稀疏）。
   - 会话记忆与摘要，保持长对话上下文。
 - **运行形态**：FastAPI 后端 + 纯前端（Vue 3 CDN 单页）+ Milvus 向量库。
+
+## 未来迭代（Todo Lists）
+
+### RAG部分
+ 文本切分升级为语义分块（Semantic Chunking）
+ 向量嵌入：新增多模态 embedding 能力
+ 检索优化：实现子问题检索、利用元数据、展示参考文件来源
+ 生成优化：适配多文档场景的 refine 策略
+ 新增提问改写功能
+ 搭建 RAG 评估体系
+### 其他能力拓展
+ 开发 SQL assistant Skill
+ 实现暂停功能与人工介入机制
+ 新增问题类型判断，简单问题跳过复杂处理流程
+ 扩展网络搜索能力
+ 支持多步骤规划与任务并行执行
+ 搭建路由器节点，由 LLM 自主判断下一步动作
+ 优化 memory 管理：集成 MemO、LangMem 等方案
+### 后端服务建设
+ 实现用户注册登录、密码加密、权限管理，基于 sqlalchemy 搭建 ORM 数据库
+ 聊天记录落地数据库，引入 redis 做缓存优化
 
 ## 目录与架构
 - 后端：`SuperAgent/backend/`
@@ -54,18 +74,6 @@
 - Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_COLLECTION`
 - 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
 
-## 快速启动（本地）
-1) 准备 Milvus（可用仓库内 `docker-compose`，或指向已有 Milvus 服务）。
-2) 安装依赖（Python 3.12+）：
-```bash
-pip install -e .
-```
-3) 启动后端（仓库根目录）：
-```bash
-uvicorn SuperAgent.backend.app:app --host 0.0.0.0 --port 8000 --reload
-```
-4) 访问前端：浏览器打开 `http://localhost:8000/`。
-
 ## API 速览
 - `POST /chat`：聊天，入参 `message`、`user_id`、`session_id`。
 - `GET /sessions/{user_id}`：列出会话。
@@ -75,14 +83,4 @@ uvicorn SuperAgent.backend.app:app --host 0.0.0.0 --port 8000 --reload
 - `POST /documents/upload`：上传并向量化 PDF/Word。
 - `DELETE /documents/{filename}`：删除指定文档的向量数据。
 
-## 未来迭代（建议）
-- [ ] 增加更多工具（企业内部 API、数据库查询等）。
-- [ ] 对话消息与摘要落库（如 Postgres）以替换 JSON 文件。
-- [ ] 前端流式回复与打字效果。
-- [ ] CI/测试覆盖：接口与检索链路集成测试。
-- [ ] 监控与日志：为检索/工具调用添加可观测性指标。
 
-## 维护提示
-- 修改检索逻辑或向量维度时，记得重建 Milvus 集合索引。
-- 嵌入和稀疏向量共用语料拟合，更新大批量文档时建议批量重跑 `fit_corpus`。
-- 前端通过静态文件挂载，无需额外构建，适合 CDN/对象存储分发。

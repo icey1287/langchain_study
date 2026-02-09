@@ -183,6 +183,34 @@
                 <!-- Messages -->
                 <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
                     <div class="message-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
+                    <div v-if="!msg.isUser && msg.ragTrace" class="message-meta">
+                        <details class="reasoning-details">
+                            <summary>检索过程</summary>
+                            <div class="reasoning-content">
+                                <div class="trace-line">
+                                    工具：{{ msg.ragTrace.tool_used ? msg.ragTrace.tool_name : '未使用' }}
+                                </div>
+                                <div v-if="msg.ragTrace.step_back_question" class="trace-line">
+                                    退步问题：{{ msg.ragTrace.step_back_question }}
+                                </div>
+                                <div v-if="msg.ragTrace.expanded_query" class="trace-line">
+                                    扩展查询：{{ msg.ragTrace.expanded_query }}
+                                </div>
+                                <div v-if="msg.ragTrace.retrieved_chunks && msg.ragTrace.retrieved_chunks.length" class="sources">
+                                    <div class="sources-title">向量检索结果</div>
+                                    <ul class="sources-list">
+                                        <li v-for="(chunk, sIndex) in msg.ragTrace.retrieved_chunks" :key="sIndex" class="source-item">
+                                            <div class="source-title-line">
+                                                <span class="source-file">{{ chunk.filename }}</span>
+                                                <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
+                                            </div>
+                                            <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
                 </div>
                 
                 <!-- Loading Indicator -->

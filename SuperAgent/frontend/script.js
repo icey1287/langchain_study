@@ -112,11 +112,14 @@ createApp({
                 }
 
                 const data = payload;
-                
+                const responseText = data && typeof data === 'object' && 'response' in data ? data.response : String(data);
+                const ragTrace = data && typeof data === 'object' ? (data.rag_trace || null) : null;
+
                 // Add bot response
                 this.messages.push({
-                    text: data.response,
-                    isUser: false
+                    text: responseText,
+                    isUser: false,
+                    ragTrace
                 });
 
             } catch (error) {
@@ -196,7 +199,8 @@ createApp({
                 // 转换消息格式并显示
                 this.messages = data.messages.map(msg => ({
                     text: msg.content,
-                    isUser: msg.type === 'human'
+                    isUser: msg.type === 'human',
+                    ragTrace: msg.rag_trace || null
                 }));
                 
                 this.$nextTick(() => {

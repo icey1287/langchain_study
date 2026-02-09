@@ -257,6 +257,93 @@ body {
     box-shadow: 0 2px 5px rgba(0,0,0,0.02);
 }
 
+.message-meta {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.03);
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
+.reasoning-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--primary-color);
+    list-style: none;
+}
+
+.reasoning-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.reasoning-details summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.2s ease;
+}
+
+.reasoning-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.reasoning-content {
+    margin-top: 6px;
+    color: var(--text-color);
+}
+
+.trace-line {
+    margin-bottom: 6px;
+    line-height: 1.5;
+}
+
+.sources {
+    margin-top: 10px;
+}
+
+.sources-title {
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 6px;
+}
+
+.sources-list {
+    list-style: none;
+    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.source-item {
+    background: rgba(255, 255, 255, 0.6);
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.source-title-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.source-file {
+    color: var(--primary-color);
+}
+
+.source-page {
+    color: var(--text-light);
+}
+
+.source-excerpt {
+    margin-top: 4px;
+    color: var(--text-color);
+    font-size: 0.82rem;
+}
+
 .bot-message .message-content {
     background-color: var(--bot-msg-bg);
     color: #444;

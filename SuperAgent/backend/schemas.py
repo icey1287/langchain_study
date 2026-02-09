@@ -8,14 +8,32 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default_session"
 
 
+class RetrievedChunk(BaseModel):
+    filename: str
+    page_number: Optional[str | int] = None
+    text: Optional[str] = None
+
+
+class RagTrace(BaseModel):
+    tool_used: bool
+    tool_name: str
+    query: Optional[str] = None
+    expanded_query: Optional[str] = None
+    step_back_question: Optional[str] = None
+    step_back_answer: Optional[str] = None
+    retrieved_chunks: Optional[List[RetrievedChunk]] = None
+
+
 class ChatResponse(BaseModel):
     response: str
+    rag_trace: Optional[RagTrace] = None
 
 
 class MessageInfo(BaseModel):
     type: str
     content: str
     timestamp: str
+    rag_trace: Optional[RagTrace] = None
 
 
 class SessionMessagesResponse(BaseModel):

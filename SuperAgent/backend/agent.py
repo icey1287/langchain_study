@@ -5,9 +5,9 @@ from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 try:
-    from .tools import get_current_weather, search_knowledge_base
+    from .tools import get_current_weather, search_knowledge_base, get_last_rag_context
 except ImportError:
-    from tools import get_current_weather, search_knowledge_base
+    from tools import get_current_weather, search_knowledge_base, get_last_rag_context
 from datetime import datetime
 
 load_dotenv()
@@ -30,7 +30,7 @@ class ConversationStorage:
 
         self.storage_file = storage_path
 
-    def save(self, user_id: str, session_id: str, messages: list, metadata: dict = None):
+    def save(self, user_id: str, session_id: str, messages: list, metadata: dict = None, extra_message_data: list = None):
         """保存对话"""
         data = self._load()
 
@@ -38,12 +38,17 @@ class ConversationStorage:
             data[user_id] = {}
 
         serialized = []
-        for msg in messages:
-            serialized.append({
+        for idx, msg in enumerate(messages):
+            record = {
                 "type": msg.type,
                 "content": msg.content,
                 "timestamp": datetime.now().isoformat()
-            })
+            }
+            if extra_message_data and idx < len(extra_message_data):
+                extra = extra_message_data[idx] or {}
+                if "rag_trace" in extra:
+                    record["rag_trace"] = extra["rag_trace"]
+            serialized.append(record)
 
         data[user_id][session_id] = {
             "messages": serialized,
@@ -121,6 +126,8 @@ def create_agent_instance():
             "You are a cute cat bot that loves to help users. "
             "When responding, you may use tools to assist. "
             "Use the search_knowledge_base tool when users ask questions that might be in uploaded documents. "
+            "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
+            "but do not reveal chain-of-thought. "
             "If you don't know the answer, admit it honestly."
         ),
     )
@@ -152,6 +159,9 @@ def summarize_old_messages(model, messages: list) -> str:
 def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
     """使用 Agent 处理用户消息并返回响应"""
     messages = storage.load(user_id, session_id)
+
+    # 清理可能残留的 RAG 上下文，避免跨请求污染
+    get_last_rag_context(clear=True)
     
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -178,6 +188,37 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
         response_content = str(result)
     
     messages.append(AIMessage(content=response_content))
-    storage.save(user_id, session_id, messages)
-    
-    return response_content
+
+    rag_context = get_last_rag_context(clear=True)
+    rag_trace = None
+    if rag_context:
+        retrieved_chunks = []
+        seen = set()
+        for item in rag_context.get("results", []):
+            key = (item.get("filename"), item.get("page_number"), item.get("text"))
+            if key in seen:
+                continue
+            seen.add(key)
+            retrieved_chunks.append({
+                "filename": item.get("filename", "Unknown"),
+                "page_number": item.get("page_number", "N/A"),
+                "text": item.get("text", "") or "",
+            })
+
+        rag_trace = {
+            "tool_used": bool(rag_context.get("tool_used")),
+            "tool_name": "search_knowledge_base",
+            "query": rag_context.get("query", ""),
+            "expanded_query": rag_context.get("expanded_query", ""),
+            "step_back_question": rag_context.get("step_back_question", ""),
+            "step_back_answer": rag_context.get("step_back_answer", ""),
+            "retrieved_chunks": retrieved_chunks,
+        }
+
+    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+
+    return {
+        "response": response_content,
+        "rag_trace": rag_trace,
+    }

@@ -68,7 +68,8 @@ async def get_session_messages(user_id: str, session_id: str):
             messages.append(MessageInfo(
                 type=msg_data["type"],
                 content=msg_data["content"],
-                timestamp=msg_data["timestamp"]
+                timestamp=msg_data["timestamp"],
+                rag_trace=msg_data.get("rag_trace")
             ))
         
         return SessionMessagesResponse(messages=messages)
@@ -117,6 +118,8 @@ async def delete_session(user_id: str, session_id: str):
 async def chat_endpoint(request: ChatRequest):
     try:
         resp = chat_with_agent(request.message, request.user_id, request.session_id)
+        if isinstance(resp, dict):
+            return ChatResponse(**resp)
         return ChatResponse(response=resp)
     except Exception as e:
         message = str(e)

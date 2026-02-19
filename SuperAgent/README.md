@@ -13,12 +13,16 @@ Agent的项目记录，方便后续持续更新与展示。
 - **混合检索落地**：稠密向量 + BM25 稀疏向量，Milvus Hybrid Search + RRF 排序，兼顾语义与词匹配。
 - **Jina Rerank 接入**：Hybrid/Dense 召回后进行 API 级精排，支持返回 `rerank_score` 并在前端可视化。
 - **双向降级**：稀疏生成或 Hybrid 调用失败时自动降级为纯稠密检索，提升稳定性。
+- **流式输出（Streaming）**：后端基于 `agent.astream(stream_mode="messages")` 逐 token 推送，前端 SSE + ReadableStream 实现打字机效果。
+- **实时 RAG 过程可视化**：检索过程在模型"思考中"阶段就开始展示，通过 `asyncio.Queue` + 后台任务架构实现工具执行期间的实时推送。
+- **回答终止功能**：前端 `AbortController` + 后端 `StreamingResponse` 支持用户随时中断正在生成的回答。
 - **会话摘要记忆**：自动摘要旧消息并注入系统提示，维持上下文且控制 token。
 - **文档处理链路**：上传 → 切分 → 稠密/稀疏向量同步生成 → Milvus 入库，支持重复上传自动清理旧 chunk。
 - **工具可扩展**：天气查询示例 + 知识库检索，便于按需增添第三方 API 或企业数据源。
 - **RAG 过程可观测**：记录检索、评分、重写与来源信息，前端可展开查看每一步细节。
 - **查询重写体系**：Step-Back 与 HyDE 两种扩展方式 + 路由选择，必要时触发重写检索。
 - **相关性评分门控**：基于结构化输出的 `grade_documents` 判断是否需要重写检索。
+- **实时思考链路展示**：通过 `asyncio` 事件循环穿透技术，实现 Agent 在执行 RAG、评分、重写等同步工具时，实时向前端推送思考步骤（Searching -> Grading -> Rewriting），彻底解决"静默思考"问题。
 
 ## 未来迭代（Todo Lists）
 
@@ -41,7 +45,7 @@ Agent的项目记录，方便后续持续更新与展示。
 6. 搭建路由器节点，由 LLM 自主判断下一步动作
 7. 优化 memory 管理：集成 MemO、LangMem 等方案
 8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
-9. 实现流式输出思考过程和最终回答
+9. ~~实现流式输出思考过程和最终回答~~ ✅ 已实现
 10. 历史记录会话名称可修改
 
 ### 后端服务建设
@@ -70,14 +74,14 @@ Agent的项目记录，方便后续持续更新与展示。
 ## 核心流程
 
 ### 1) 项目全链路（端到端）
-1. 用户在前端输入问题，调用 `POST /chat`。
-2. FastAPI `api.py` 接收请求并进入 `agent.py`。
+1. 用户在前端输入问题，调用 `POST /chat/stream`（流式）。
+2. FastAPI `api.py` 返回 `StreamingResponse(media_type="text/event-stream")`。
 3. LangChain Agent 根据问题类型决定是否调用工具：
   - 天气问题 → `get_current_weather`
   - 知识问答 → `search_knowledge_base`
-4. 若命中知识库工具，进入 `rag_pipeline.py` 执行检索工作流。
-5. 检索结果与 RAG Trace 一起返回，Agent 生成最终回答。
-6. 后端返回 `response + rag_trace`，前端渲染回答，并在“检索过程”中展示每一步。
+4. 若命中知识库工具，进入 `rag_pipeline.py` 执行检索工作流，各阶段通过 `emit_rag_step()` 实时推送到前端。
+5. 检索结果与 RAG Trace 一起返回，Agent 流式生成最终回答（逐 token 推送）。
+6. 前端 ReadableStream 逐块解析 SSE，打字机效果实时渲染。
 7. 同时消息落盘到 `customer_service_history.json`，支持历史会话回放。
 
 ### 2) RAG 全链路（重点）
@@ -128,12 +132,115 @@ Agent的项目记录，方便后续持续更新与展示。
 - 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
 
 ## API 速览
-- `POST /chat`：聊天，入参 `message`、`user_id`、`session_id`。
+- `POST /chat`：聊天（非流式），入参 `message`、`user_id`、`session_id`。
+- `POST /chat/stream`：聊天（流式 SSE），入参同上，返回 `text/event-stream`。
 - `GET /sessions/{user_id}`：列出会话。
 - `GET /sessions/{user_id}/{session_id}`：拉取某会话消息。
 - `DELETE /sessions/{user_id}/{session_id}`：删除会话。
 - `GET /documents`：列出已入库文档及 chunk 数。
 - `POST /documents/upload`：上传并向量化 PDF/Word。
 - `DELETE /documents/{filename}`：删除指定文档的向量数据。
+
+## 流式输出与实时检索过程 — 技术细节
+
+### 整体架构
+
+```
+用户发送消息
+    │
+    ▼
+POST /chat/stream → StreamingResponse(text/event-stream)
+    │
+    ▼
+chat_with_agent_stream()
+    │
+    ├── 创建统一输出队列 (asyncio.Queue)
+    ├── 设置 _RagStepProxy → emit_rag_step() 的输出直接入队
+    ├── 启动 _agent_worker 后台任务 (asyncio.create_task)
+    │     └── agent.astream(stream_mode="messages") 逐 token 产出
+    │           ├── AIMessageChunk (文本) → {"type": "content"} 入队
+    │           └── tool_call_chunks (工具调用) → 跳过
+    │
+    └── 主循环：await output_queue.get() → yield SSE
+          ▲
+          │ (并发) RAG 工具在线程池中执行
+          │ emit_rag_step() → loop.call_soon_threadsafe → 入队
+          │ {"type": "rag_step"} 立即从队列取出并推送到前端
+```
+
+### 后端实现
+
+#### 1) 流式生成 (`agent.py`)
+- 使用 LangGraph `agent.astream(stream_mode="messages")` 获取逐 token 的 `AIMessageChunk`。
+- 过滤 `tool_call_chunks`，只转发文本内容给前端。
+- **关键设计**：Agent 流式循环运行在 `asyncio.create_task` 后台任务中，主生成器只负责从统一 `output_queue` 取事件并 yield。这样 RAG 步骤在工具执行期间（agent 阻塞等待工具返回时）仍然可以实时推送到前端。
+
+#### 2) 实时 RAG 步骤推送 (`tools.py` + `rag_pipeline.py`)
+- `emit_rag_step(icon, label, detail)` 通过 `asyncio.get_event_loop().call_soon_threadsafe()` 将步骤从同步线程安全地推送到异步队列。
+- `_RagStepProxy` 代理对象将原始 step dict 包装为 `{"type": "rag_step", "step": {...}}` 后放入统一输出队列，**无需额外 relay 任务**。
+- `rag_pipeline.py` 在每个关键节点发射步骤：
+  - `retrieve_initial` → "正在检索知识库..."
+  - `grade_documents` → "正在评估文档相关性..."
+  - `rewrite_question` → "正在重写查询..."（含策略选择）
+  - `retrieve_expanded` → "使用扩展查询重新检索..."
+
+#### 3) SSE 协议格式
+每个事件格式：`data: {JSON}\n\n`，类型字段：
+- `content`：文本 token（打字机效果）
+- `rag_step`：实时检索步骤（`{icon, label, detail}`）
+- `trace`：完整 RAG 追踪信息（回答完成后发送）
+- `error`：错误信息
+- `[DONE]`：流结束标记
+
+#### 4) StreamingResponse 配置 (`api.py`)
+```python
+StreamingResponse(
+    event_generator(),
+    media_type="text/event-stream",
+    headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+    },
+)
+```
+
+### 前端实现
+
+#### 1) ReadableStream 解析 (`script.js`)
+- 使用 `response.body.getReader()` + `TextDecoder` 逐块读取。
+- 手动按 `\n\n` 分割 SSE 事件，解析 `data: ` 前缀后的 JSON。
+- `content` 事件追加到消息文本；`rag_step` 事件追加到检索步骤数组并同步更新思考状态文字。
+
+#### 2) 思考气泡二合一
+- 发送消息后立即创建带 `isThinking: true` 的气泡，显示跳动圆点 + 动态文字。
+- 收到 `rag_step` 时，`thinkingLabel` 更新为当前步骤（如"正在检索知识库..."）。
+- 收到第一个 `content` token 时，`isThinking = false`，同一气泡无缝切换为正常文本流。
+- **不存在两个分离的气泡**，从思考 → 检索 → 回答全程在同一个气泡内完成。
+
+#### 3) Vue 3 响应式注意事项
+- 通过 `this.messages[botMsgIdx]` 索引访问（而非缓存对象引用），确保拿到 Vue 的 reactive proxy。
+- `ragSteps` 数组通过 `push()` 触发响应式更新。
+
+### 终止功能
+
+#### 前端
+- 发送按钮在 `isLoading` 期间切换为红色终止按钮（`v-if/v-else`）。
+- 点击调用 `AbortController.abort()`，取消正在进行的 `fetch` 请求。
+- 捕获 `AbortError`，在气泡中显示"(已终止回答)"。
+
+#### 后端
+- FastAPI 的 `StreamingResponse` 在客户端断开时自动停止迭代异步生成器。
+- Agent 后台任务随之取消，不会继续消耗 token。
+
+## 更新日志
+
+### 2026-02-19 RAG 实时思考链路修复
+- **问题**：Agent 在执行同步工具（如 `search_knowledge_base`）时，由于运行在线程池中，无法正确获取主线程的 asyncio 事件循环，导致 `emit_rag_step` 事件丢失，前端"思考中"气泡一直静止。
+- **修复**：
+  1. **Backend (`tools.py`)**：在 `set_rag_step_queue` 中显式捕获主线程的 `loop`。
+  2. **Backend (`tools.py`)**：更新 `emit_rag_step` 使用捕获的 `_RAG_STEP_LOOP.call_soon_threadsafe` 跨线程调度事件。
+  3. **Frontend (`script.js`)**：在发送消息时初始化空的 `ragSteps: []` 数组，确保 Vue 响应式系统能立即追踪后续的 push 操作。
+- **效果**：用户提问后，思考气泡内实时跳动显示检索步骤（如"🔍 正在检索知识库..." -> "📊 正在评估文档相关性..."），不再只有静态的"正在思考中..."。
 
 

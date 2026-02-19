@@ -1,7 +1,9 @@
 import re
 import os
+import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 
 try:
     from .schemas import (
@@ -17,7 +19,7 @@ try:
         DocumentUploadResponse,
         DocumentDeleteResponse,
     )
-    from .agent import chat_with_agent, storage
+    from .agent import chat_with_agent, chat_with_agent_stream, storage
     from .document_loader import DocumentLoader
     from .milvus_writer import MilvusWriter
     from .milvus_client import MilvusManager
@@ -36,7 +38,7 @@ except ImportError:
         DocumentUploadResponse,
         DocumentDeleteResponse,
     )
-    from agent import chat_with_agent, storage
+    from agent import chat_with_agent, chat_with_agent_stream, storage
     from document_loader import DocumentLoader
     from milvus_writer import MilvusWriter
     from milvus_client import MilvusManager
@@ -138,6 +140,34 @@ async def chat_endpoint(request: ChatRequest):
                 raise HTTPException(status_code=code, detail=message)
             raise HTTPException(status_code=code, detail=message)
         raise HTTPException(status_code=500, detail=message)
+
+
+@router.post("/chat/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    """跟 Agent 对话 (流式)"""
+    async def event_generator():
+        try:
+            # chat_with_agent_stream 已经生成了 SSE 格式的字符串 (data: {...}\n\n)
+            async for chunk in chat_with_agent_stream(
+                request.message, 
+                request.user_id, 
+                request.session_id
+            ):
+                yield chunk
+        except Exception as e:
+            error_data = {"type": "error", "content": str(e)}
+            # SSE 格式错误
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/documents", response_model=DocumentListResponse)

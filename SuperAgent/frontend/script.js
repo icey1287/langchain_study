@@ -8,6 +8,7 @@ createApp({
             isLoading: false,
             activeNav: 'newChat',
             API_URL: '/chat',
+            abortController: null,
             userId: 'user_' + Math.random().toString(36).substring(2, 11),
             sessionId: 'session_' + Date.now(),
             sessions: [],
@@ -70,6 +71,12 @@ createApp({
             }
         },
         
+        handleStop() {
+            if (this.abortController) {
+                this.abortController.abort();
+            }
+        },
+        
         async handleSend() {
             const text = this.userInput.trim();
             if (!text || this.isLoading || this.isComposing) return;
@@ -89,50 +96,97 @@ createApp({
             // Show loading
             this.isLoading = true;
 
+            // 立刻创建气泡，显示思考动画（二合一：思考 + 流式输出在同一个气泡）
+            this.messages.push({ 
+                text: '', 
+                isUser: false, 
+                isThinking: true, 
+                ragTrace: null,
+                ragSteps: [] 
+            });
+            const botMsgIdx = this.messages.length - 1;
+
+            // 用于终止请求
+            this.abortController = new AbortController();
+
             try {
-                const response = await fetch(this.API_URL, {
+                const response = await fetch('/chat/stream', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         message: text,
                         user_id: this.userId,
                         session_id: this.sessionId
                     }),
+                    signal: this.abortController.signal,
                 });
 
-                const contentType = response.headers.get('content-type') || '';
-                const isJson = contentType.includes('application/json');
-                const payload = isJson ? await response.json() : await response.text();
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-                if (!response.ok) {
-                    const detail = isJson ? (payload.detail || JSON.stringify(payload)) : String(payload);
-                    throw new Error(`HTTP ${response.status}: ${detail}`);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    
+                    let eventEndIndex;
+                    while ((eventEndIndex = buffer.indexOf('\n\n')) !== -1) {
+                        const eventStr = buffer.slice(0, eventEndIndex);
+                        buffer = buffer.slice(eventEndIndex + 2);
+                        
+                        if (eventStr.startsWith('data: ')) {
+                            const dataStr = eventStr.slice(6);
+                            if (dataStr === '[DONE]') continue;
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'content') {
+                                    // 收到第一个 token 时关闭思考动画
+                                    if (this.messages[botMsgIdx].isThinking) {
+                                        this.messages[botMsgIdx].isThinking = false;
+                                    }
+                                    this.messages[botMsgIdx].text += data.content;
+                                } else if (data.type === 'trace') {
+                                    this.messages[botMsgIdx].ragTrace = data.rag_trace;
+                                } else if (data.type === 'rag_step') {
+                                    // 实时 RAG 检索步骤 — 直接显示在思考气泡内
+                                    if (!this.messages[botMsgIdx].ragSteps) {
+                                        this.messages[botMsgIdx].ragSteps = [];
+                                    }
+                                    this.messages[botMsgIdx].ragSteps.push(data.step);
+                                } else if (data.type === 'error') {
+                                    this.messages[botMsgIdx].isThinking = false;
+                                    this.messages[botMsgIdx].text += `\n[Error: ${data.content}]`;
+                                }
+                            } catch (e) {
+                                console.warn('SSE parse error:', e);
+                            }
+                        }
+                    }
+                    this.$nextTick(() => this.scrollToBottom());
                 }
 
-                const data = payload;
-                const responseText = data && typeof data === 'object' && 'response' in data ? data.response : String(data);
-                const ragTrace = data && typeof data === 'object' ? (data.rag_trace || null) : null;
-
-                // Add bot response
-                this.messages.push({
-                    text: responseText,
-                    isUser: false,
-                    ragTrace
-                });
-
             } catch (error) {
-                console.error('Error:', error);
-                this.messages.push({
-                    text: `喵呜... 我这边遇到点问题：\n\n${String(error.message || error)}`,
-                    isUser: false
-                });
+                if (error.name === 'AbortError') {
+                    // 用户主动终止
+                    this.messages[botMsgIdx].isThinking = false;
+                    if (!this.messages[botMsgIdx].text) {
+                        this.messages[botMsgIdx].text = '(已终止回答)';
+                    } else {
+                        this.messages[botMsgIdx].text += '\n\n_(回答已被终止)_';
+                    }
+                } else {
+                    console.error('Error:', error);
+                    this.messages[botMsgIdx].isThinking = false;
+                    this.messages[botMsgIdx].text = `喵呜... 出了点问题：${error.message}`;
+                }
             } finally {
                 this.isLoading = false;
-                this.$nextTick(() => {
-                    this.scrollToBottom();
-                });
+                this.abortController = null;
+                this.$nextTick(() => this.scrollToBottom());
             }
         },
         

@@ -1,13 +1,14 @@
 from dotenv import load_dotenv
 import os
 import json
+import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
 try:
-    from .tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards
+    from .tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 except ImportError:
-    from tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards
+    from tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 from datetime import datetime
 
 load_dotenv()
@@ -117,6 +118,7 @@ def create_agent_instance():
         api_key=API_KEY,
         base_url=BASE_URL,
         temperature=0.3,
+        stream_usage=True,
     )
 
     agent = create_agent(
@@ -207,3 +209,101 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
         "response": response_content,
         "rag_trace": rag_trace,
     }
+
+
+async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
+    """使用 Agent 处理用户消息并流式返回响应。
+    
+    架构：使用统一输出队列 + 后台任务，确保 RAG 检索步骤在工具执行期间实时推送，
+    而非等待工具完成后才显示。
+    """
+    messages = storage.load(user_id, session_id)
+
+    # 清理可能残留的 RAG 上下文
+    get_last_rag_context(clear=True)
+    reset_tool_call_guards()
+
+    # 统一输出队列：所有事件（content / rag_step）都汇入这里
+    output_queue = asyncio.Queue()
+
+    class _RagStepProxy:
+        """代理对象：将 emit_rag_step 的原始 step dict 包装后放入统一输出队列。"""
+        def put_nowait(self, step):
+            output_queue.put_nowait({"type": "rag_step", "step": step})
+
+    set_rag_step_queue(_RagStepProxy())
+
+    if len(messages) > 50:
+        summary = summarize_old_messages(model, messages[:40])
+        messages = [
+            SystemMessage(content=f"之前的对话摘要：\n{summary}")
+        ] + messages[40:]
+
+    messages.append(HumanMessage(content=user_text))
+
+    full_response = ""
+
+    async def _agent_worker():
+        """后台任务：运行 agent 并将内容 chunk 推入输出队列。"""
+        nonlocal full_response
+        try:
+            async for msg, metadata in agent.astream(
+                {"messages": messages},
+                stream_mode="messages",
+                config={"recursion_limit": 8},
+            ):
+                if not isinstance(msg, AIMessageChunk):
+                    continue
+                if getattr(msg, "tool_call_chunks", None):
+                    continue
+
+                content = ""
+                if isinstance(msg.content, str):
+                    content = msg.content
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if isinstance(block, str):
+                            content += block
+                        elif isinstance(block, dict) and block.get("type") == "text":
+                            content += block.get("text", "")
+
+                if content:
+                    full_response += content
+                    await output_queue.put({"type": "content", "content": content})
+        except Exception as e:
+            await output_queue.put({"type": "error", "content": str(e)})
+        finally:
+            # 哨兵：通知主循环 agent 已完成
+            await output_queue.put(None)
+
+    # 启动后台任务
+    agent_task = asyncio.create_task(_agent_worker())
+
+    try:
+        # 主循环：持续从统一队列取事件并 yield SSE
+        # RAG 步骤在工具执行期间通过 call_soon_threadsafe 实时入队，不需要等 agent 产出 chunk
+        while True:
+            event = await output_queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+    finally:
+        # 确保 agent 任务完成
+        await agent_task
+        set_rag_step_queue(None)
+
+    # 获取 RAG trace
+    rag_context = get_last_rag_context(clear=True)
+    rag_trace = rag_context.get("rag_trace") if rag_context else None
+
+    # 发送 trace 信息
+    if rag_trace:
+        yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
+
+    # 发送结束信号
+    yield "data: [DONE]\n\n"
+
+    # 保存对话
+    messages.append(AIMessage(content=full_response))
+    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)

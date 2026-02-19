@@ -182,7 +182,27 @@
                 
                 <!-- Messages -->
                 <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
-                    <div class="message-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
+                    <!-- 思考动画（在气泡内部，RAG 步骤实时填入） -->
+                    <div v-if="!msg.isUser && msg.isThinking && !msg.text" class="message-content thinking-content">
+                        <div class="thinking-header">
+                            <div class="thinking-dots">
+                                <span class="tdot"></span>
+                                <span class="tdot"></span>
+                                <span class="tdot"></span>
+                            </div>
+                            <span v-if="!msg.ragSteps || !msg.ragSteps.length" class="thinking-text">正在思考中...</span>
+                            <span v-else class="thinking-text">{{ msg.ragSteps[msg.ragSteps.length - 1].label }}</span>
+                        </div>
+                        <div v-if="msg.ragSteps && msg.ragSteps.length" class="thinking-trace-lines">
+                            <div v-for="(step, sIdx) in msg.ragSteps" :key="sIdx" class="thinking-trace-line">
+                                <span class="thinking-trace-icon">{{ step.icon || '▶' }}</span>
+                                <span class="thinking-trace-label">{{ step.label }}</span>
+                                <span v-if="step.detail" class="thinking-trace-detail">{{ step.detail }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 正常回复内容 -->
+                    <div v-else class="message-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
                     <div v-if="!msg.isUser && msg.ragTrace" class="message-meta">
                         <details class="reasoning-details">
                             <summary>检索过程</summary>
@@ -292,11 +312,6 @@
                 </div>
                 
                 <!-- Loading Indicator -->
-                <div v-if="isLoading" class="typing-indicator">
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                </div>
             </div>
 
             <div class="input-area-wrapper">
@@ -312,7 +327,10 @@
                         rows="1"
                         ref="textarea"
                     ></textarea>
-                    <button @click="handleSend" class="send-btn">
+                    <button v-if="isLoading" @click="handleStop" class="send-btn stop-btn" title="终止回答">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                    <button v-else @click="handleSend" class="send-btn" title="发送">
                         <i class="fas fa-paper-plane"></i>
                     </button>
                 </div>

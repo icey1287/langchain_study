@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 
 try:
     from .rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
+    from .tools import emit_rag_step
 except ImportError:
     from rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
+    from tools import emit_rag_step
 
 load_dotenv()
 
@@ -32,6 +34,7 @@ def _get_grader_model():
             api_key=API_KEY,
             base_url=BASE_URL,
             temperature=0,
+            stream_usage=True,
         )
     return _grader_model
 
@@ -47,6 +50,7 @@ def _get_router_model():
             api_key=API_KEY,
             base_url=BASE_URL,
             temperature=0,
+            stream_usage=True,
         )
     return _router_model
 
@@ -102,42 +106,47 @@ def _format_docs(docs: List[dict]) -> str:
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
+    emit_rag_step("🔍", "正在检索知识库...", f"查询: {query[:50]}")
     retrieved = retrieve_documents(query, top_k=5)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
+    emit_rag_step("✅", f"检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+    rag_trace = {
+        "tool_used": True,
+        "tool_name": "search_knowledge_base",
+        "query": query,
+        "expanded_query": query,
+        "retrieved_chunks": results,
+        "initial_retrieved_chunks": results,
+        "retrieval_stage": "initial",
+        "rerank_enabled": retrieve_meta.get("rerank_enabled"),
+        "rerank_applied": retrieve_meta.get("rerank_applied"),
+        "rerank_model": retrieve_meta.get("rerank_model"),
+        "rerank_endpoint": retrieve_meta.get("rerank_endpoint"),
+        "rerank_error": retrieve_meta.get("rerank_error"),
+        "retrieval_mode": retrieve_meta.get("retrieval_mode"),
+        "candidate_k": retrieve_meta.get("candidate_k"),
+    }
     return {
         "query": query,
         "docs": results,
         "context": context,
-        "rag_trace": {
-            "tool_used": True,
-            "tool_name": "search_knowledge_base",
-            "query": query,
-            "expanded_query": query,
-            "retrieved_chunks": results,
-            "initial_retrieved_chunks": results,
-            "retrieval_stage": "initial",
-            "rerank_enabled": retrieve_meta.get("rerank_enabled"),
-            "rerank_applied": retrieve_meta.get("rerank_applied"),
-            "rerank_model": retrieve_meta.get("rerank_model"),
-            "rerank_endpoint": retrieve_meta.get("rerank_endpoint"),
-            "rerank_error": retrieve_meta.get("rerank_error"),
-            "retrieval_mode": retrieve_meta.get("retrieval_mode"),
-            "candidate_k": retrieve_meta.get("candidate_k"),
-        },
+        "rag_trace": rag_trace,
     }
 
 
 def grade_documents_node(state: RAGState) -> RAGState:
     grader = _get_grader_model()
+    emit_rag_step("📊", "正在评估文档相关性...")
     if not grader:
-        rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
+        grade_update = {
             "grade_score": "unknown",
             "grade_route": "rewrite_question",
             "rewrite_needed": True,
-        })
+        }
+        rag_trace = state.get("rag_trace", {}) or {}
+        rag_trace.update(grade_update)
         return {"route": "rewrite_question", "rag_trace": rag_trace}
     question = state["question"]
     context = state.get("context", "")
@@ -147,17 +156,23 @@ def grade_documents_node(state: RAGState) -> RAGState:
     )
     score = (response.binary_score or "").strip().lower()
     route = "generate_answer" if score == "yes" else "rewrite_question"
-    rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update({
+    if route == "generate_answer":
+        emit_rag_step("✅", "文档相关性评估通过", f"评分: {score}")
+    else:
+        emit_rag_step("⚠️", "文档相关性不足，将重写查询", f"评分: {score}")
+    grade_update = {
         "grade_score": score,
         "grade_route": route,
         "rewrite_needed": route == "rewrite_question",
-    })
+    }
+    rag_trace = state.get("rag_trace", {}) or {}
+    rag_trace.update(grade_update)
     return {"route": route, "rag_trace": rag_trace}
 
 
 def rewrite_question_node(state: RAGState) -> RAGState:
     question = state["question"]
+    emit_rag_step("✏️", "正在重写查询...")
     router = _get_router_model()
     strategy = "step_back"
     if router:
@@ -182,12 +197,14 @@ def rewrite_question_node(state: RAGState) -> RAGState:
     hypothetical_doc = ""
 
     if strategy in ("step_back", "complex"):
+        emit_rag_step("🧠", f"使用策略: {strategy}", "生成退步问题")
         step_back = step_back_expand(question)
         step_back_question = step_back.get("step_back_question", "")
         step_back_answer = step_back.get("step_back_answer", "")
         expanded_query = step_back.get("expanded_query", question)
 
     if strategy in ("hyde", "complex"):
+        emit_rag_step("📝", "HyDE 假设性文档生成中...")
         hypothetical_doc = generate_hypothetical_document(question)
 
     rag_trace = state.get("rag_trace", {}) or {}
@@ -208,6 +225,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
 
 def retrieve_expanded(state: RAGState) -> RAGState:
     strategy = state.get("expansion_type") or "step_back"
+    emit_rag_step("🔄", "使用扩展查询重新检索...", f"策略: {strategy}")
     results: List[dict] = []
     rerank_applied_any = False
     rerank_enabled_any = False
@@ -260,6 +278,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
         item["rrf_rank"] = idx
 
     context = _format_docs(deduped)
+    emit_rag_step("✅", f"扩展检索完成，共 {len(deduped)} 个片段")
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
         "expanded_query": state.get("expanded_query") or state["question"],

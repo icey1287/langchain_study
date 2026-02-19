@@ -963,3 +963,129 @@ textarea {
     height: 100%;
 }
 
+/* Thinking Animation (inside bot bubble) */
+.thinking-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 15px 20px !important;
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.thinking-dots {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.tdot {
+    width: 7px;
+    height: 7px;
+    background-color: #aaa;
+    border-radius: 50%;
+    animation: thinking-bounce 1.4s infinite ease-in-out both;
+}
+
+.tdot:nth-child(1) { animation-delay: -0.32s; }
+.tdot:nth-child(2) { animation-delay: -0.16s; }
+.tdot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes thinking-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+.thinking-text {
+    color: #999;
+    font-size: 0.88rem;
+}
+
+/* Thinking trace lines — RAG progress inside thinking bubble */
+.thinking-trace-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 4px;
+    border-left: 2px solid var(--border-color, #e0e0e0);
+    margin-left: 10px;
+}
+
+.thinking-trace-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 0.84rem;
+    animation: fadeInTraceLine 0.3s ease;
+}
+
+@keyframes fadeInTraceLine {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.thinking-trace-icon {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+}
+
+.thinking-trace-label {
+    color: var(--text-color, #333);
+    font-weight: 500;
+}
+
+.thinking-trace-detail {
+    color: var(--text-light, #999);
+    font-size: 0.8rem;
+    margin-left: 2px;
+}
+
+/* Real-time RAG steps */
+.rag-steps-live {
+    margin-top: 6px;
+}
+
+.rag-step-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-size: 0.85rem;
+    animation: fadeInStep 0.3s ease;
+}
+
+@keyframes fadeInStep {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.rag-step-icon {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+
+.rag-step-text {
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.rag-step-detail {
+    color: var(--text-light);
+    font-size: 0.8rem;
+    margin-left: 4px;
+}
+
+/* Stop button */
+.stop-btn {
+    background-color: #ff6b6b !important;
+    box-shadow: 0 4px 10px rgba(255, 107, 107, 0.3) !important;
+}
+
+.stop-btn:hover {
+    background-color: #ee5a5a !important;
+    transform: scale(1.1) !important;
+}

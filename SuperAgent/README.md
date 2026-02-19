@@ -45,8 +45,7 @@ Agent的项目记录，方便后续持续更新与展示。
 6. 搭建路由器节点，由 LLM 自主判断下一步动作
 7. 优化 memory 管理：集成 MemO、LangMem 等方案
 8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
-9. ~~实现流式输出思考过程和最终回答~~ ✅ 已实现
-10. 历史记录会话名称可修改
+9. 历史记录会话名称可修改
 
 ### 后端服务建设
 
@@ -143,7 +142,66 @@ Agent的项目记录，方便后续持续更新与展示。
 
 ## 流式输出与实时检索过程 — 技术细节
 
-### 整体架构
+#### 1. 跨线程事件调度（Cross-Thread Event Scheduling）
+这是一个解决 **"同步工具阻塞异步事件循环"** 问题的关键架构设计，常用于 Python 异步 Web 服务与 CPU 密集型/IO 密集型任务的混合场景。
+
+**痛点**：
+FastAPI 运行在单线程的 asyncio Event Loop 上。为了不阻塞主线程，LangChain 通常将同步工具（如 `search_knowledge_base`）放到 `ThreadPoolExecutor` 中运行。但在子线程中，无法直接访问主线程的 `asyncio.Queue`，且 `asyncio.get_event_loop()` 通常会失败。
+
+**解决方案**：
+我们采用了 **"Global Loop Capture + Threadsafe Callback"** 模式：
+
+1.  **Loop 捕获 (Main Thread)**:
+    在 Agent 开始生成前，主线程调用 `set_rag_step_queue()`。此时我们捕获当前的运行循环：`_RAG_STEP_LOOP = asyncio.get_running_loop()` 并保存为全局变量。
+2.  **跨线程发射 (Worker Thread)**:
+    当 RAG 工具在子线程运行时，调用 `emit_rag_step()`。
+    函数内部使用 `_RAG_STEP_LOOP.call_soon_threadsafe(queue.put_nowait, step_data)`。
+3.  **原理**:
+    `call_soon_threadsafe` 是 asyncio 唯一允许从其他线程向 Loop 注入回调的方法。它相当于向主 Loop 的"待办事项箱"投递了一个任务（即 `queue.put_nowait`），主 Loop 会在下一次 tick 立即执行它，从而实现数据的平滑流转。
+
+```python
+# 核心代码摘要 (tools.py)
+def set_rag_step_queue(queue):
+    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
+    _RAG_STEP_QUEUE = queue
+    # 关键：在主线程捕获 Loop
+    _RAG_STEP_LOOP = asyncio.get_running_loop()
+
+def emit_rag_step(icon, label):
+    # 关键：从子线程安全调度回主 Loop
+    if _RAG_STEP_LOOP and not _RAG_STEP_LOOP.is_closed():
+        _RAG_STEP_LOOP.call_soon_threadsafe(
+            _RAG_STEP_QUEUE.put_nowait, 
+            {"icon": icon, "label": label}
+        )
+```
+
+### 2. 混合检索（Hybrid Search）深度实现
+项目并非简单调用 Milvus 接口，而是手动构建了工业级的稀疏-稠密双塔检索：
+
+- **Dense Pathway**: 使用 OpenAI `text-embedding-3-small` 生成 1536 维稠密向量，捕捉语义匹配。
+- **Sparse Pathway**:
+    - 在 `embedding.py` 中实现了基于 `jieba` 分词的自定义 BM25 算法。
+    - 生成 `{word_id: tf_idf_score}` 格式的稀疏向量，模拟 ElasticSearch 的关键词匹配能力。
+- **Milvus 融合**:
+    - 使用 Milvus 的 `AnnSearchRequest` 同时发起两个请求。
+    - **RRFRanker (Reciprocal Rank Fusion)**: 采用 `k=60` 的倒数排名融合算法，将两路召回结果无参数化地合并，避免了加权求和中调节 `alpha` 参数的困难。
+
+### 3. 前端 "Thinking State Machine"
+前端 `script.js` 维护了一个微型状态机来处理通过 SSE 传回的复杂混合流：
+
+1.  **Idle**: 等待用户输入。
+2.  **Thinking (Initial)**: 收到请求，创建消息气泡，`isThinking=true`，显示默认动画。
+3.  **Thinking (Active RAG)**: 收到 `type: rag_step` 事件。
+    - 状态机保持 `isThinking=true`。
+    - 动态更新 Header 文字（如 "正在重写查询..."）。
+    - 向 `ragSteps` 数组追加步骤，触发 Vue 列表渲染。
+4.  **Streaming**: 收到第一个 `type: content` 事件。
+    - **立即切换**: 设置 `isThinking=false`。
+    - 并不销毁气泡，而是隐藏思考 header，开始在同一气泡内追加 Markdown 文本。
+    - 这样实现了从"思考"到"回答"的无缝视觉过渡，没有突兀的 UI 抖动。
+
+## 整体架构
 
 ```
 用户发送消息

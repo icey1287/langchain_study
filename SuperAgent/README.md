@@ -11,6 +11,7 @@ Agent的项目记录，方便后续持续更新与展示。
 
 ## 关键创新点
 - **混合检索落地**：稠密向量 + BM25 稀疏向量，Milvus Hybrid Search + RRF 排序，兼顾语义与词匹配。
+- **Jina Rerank 接入**：Hybrid/Dense 召回后进行 API 级精排，支持返回 `rerank_score` 并在前端可视化。
 - **双向降级**：稀疏生成或 Hybrid 调用失败时自动降级为纯稠密检索，提升稳定性。
 - **会话摘要记忆**：自动摘要旧消息并注入系统提示，维持上下文且控制 token。
 - **文档处理链路**：上传 → 切分 → 稠密/稀疏向量同步生成 → Milvus 入库，支持重复上传自动清理旧 chunk。
@@ -28,6 +29,7 @@ Agent的项目记录，方便后续持续更新与展示。
 3. 检索优化：实现多查询分解 (Multi-query)、子问题检索 ————（效果不太好，往往简单的问题也会复杂化，额外消耗token）
 4. 生成优化：适配多文档场景的 refine 策略
 5. 搭建 RAG 评估体系
+6. Rerank 策略评估（top_k、candidate_k、召回/精排比例）
 
 ### 其他能力拓展
 
@@ -39,6 +41,8 @@ Agent的项目记录，方便后续持续更新与展示。
 6. 搭建路由器节点，由 LLM 自主判断下一步动作
 7. 优化 memory 管理：集成 MemO、LangMem 等方案
 8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
+9. 实现流式输出思考过程和最终回答
+10. 历史记录会话名称可修改
 
 ### 后端服务建设
 
@@ -64,15 +68,54 @@ Agent的项目记录，方便后续持续更新与展示。
 - 向量库：Milvus（可由 `docker-compose` 或自建服务提供）。
 
 ## 核心流程
-- **对话**：前端将用户输入发送到 `/chat` → LangChain Agent 处理 → 自动调用工具（天气/知识库）→ 返回回答并追加到本地消息存储。
-- **知识检索**：`search_knowledge_base` 同时生成稠密向量与 BM25 稀疏向量 → Milvus `hybrid_search` 通过 RRF 融合排序，回传片段。
-- **RAG 质量门控**：首次检索后进行相关性评分，必要时触发查询重写与二次检索。
-- **文档入库**：上传 PDF/Word → LangChain 文档加载与分片 → 生成稠密+稀疏向量 → 写入 Milvus，并记录元数据（文件名、页码、chunk 序号）。
-- **会话记忆**：超过 50 条消息时，对前 40 条做摘要并注入系统消息，保持上下文连续但控制长度。
+
+### 1) 项目全链路（端到端）
+1. 用户在前端输入问题，调用 `POST /chat`。
+2. FastAPI `api.py` 接收请求并进入 `agent.py`。
+3. LangChain Agent 根据问题类型决定是否调用工具：
+  - 天气问题 → `get_current_weather`
+  - 知识问答 → `search_knowledge_base`
+4. 若命中知识库工具，进入 `rag_pipeline.py` 执行检索工作流。
+5. 检索结果与 RAG Trace 一起返回，Agent 生成最终回答。
+6. 后端返回 `response + rag_trace`，前端渲染回答，并在“检索过程”中展示每一步。
+7. 同时消息落盘到 `customer_service_history.json`，支持历史会话回放。
+
+### 2) RAG 全链路（重点）
+1. **初次召回**：`retrieve_initial`
+  - 调用 `retrieve_documents`。
+  - 先做 Milvus Hybrid 检索（Dense + Sparse + RRF）。
+  - 取更大候选集后走 Jina Rerank 精排。
+2. **相关性打分门控**：`grade_documents`
+  - 使用结构化输出打分 `yes/no`。
+  - `yes` 直接进入生成回答；`no` 进入重写阶段。
+3. **查询重写路由**：`rewrite_question`
+  - 在 `step_back / hyde / complex` 中选择策略。
+  - 生成 `rewrite_query`、`step_back_question`、`hypothetical_doc` 等中间结果。
+4. **二次召回**：`retrieve_expanded`
+  - 对重写后的查询（或 HyDE 文档）再次检索。
+  - 结果去重后返回上下文。
+5. **答案生成**：Agent 结合上下文生成最终回答。
+6. **可观测追踪**：返回 `rag_trace`，包括
+  - 评分结果与路由决策
+  - 重写策略与重写内容
+  - 初次/二次检索结果
+  - 检索分数 `score` 与精排分数 `rerank_score`
+
+### 3) 文档入库链路
+1. 前端上传 PDF/Word 到 `POST /documents/upload`。
+2. `document_loader.py` 解析文档并切分 chunk。
+3. `embedding.py` 生成 Dense 向量与 BM25 Sparse 向量。
+4. `milvus_writer.py` 将向量 + 元数据写入 Milvus。
+5. 后续检索可直接利用新文档参与召回。
+
+### 4) 会话记忆链路
+1. 每轮问答按 `user_id/session_id` 写入本地存储。
+2. 当消息过长时触发摘要压缩，保留长期上下文。
+3. 前端可通过会话接口读取、删除历史对话。
 
 ## 技术栈
 - 后端：FastAPI、LangChain Agents、Pydantic、Uvicorn。
-- 向量与检索：Milvus（HNSW 稠密索引 + SPARSE_INVERTED_INDEX 稀疏索引）、RRF 融合。
+- 向量与检索：Milvus（HNSW 稠密索引 + SPARSE_INVERTED_INDEX 稀疏索引）、RRF 融合、Jina Rerank 精排。
 - 嵌入与稀疏：自定义 API 调用获取稠密向量；BM25 手写稀疏向量；同时输出双塔特征。
 - 前端：Vue 3 (CDN)、marked、highlight.js、纯静态部署。
 - 工具链：dotenv 配置、requests、langchain_text_splitters、langchain_community.loaders。
@@ -80,6 +123,7 @@ Agent的项目记录，方便后续持续更新与展示。
 ## 环境变量
 需在仓库根目录或运行环境配置：
 - 模型相关：`ARK_API_KEY`、`MODEL`、`BASE_URL`、`EMBEDDER`
+- Rerank 相关：`RERANK_MODEL`、`RERANK_BINDING_HOST`、`RERANK_API_KEY`
 - Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_COLLECTION`
 - 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
 

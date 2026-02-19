@@ -102,7 +102,9 @@ def _format_docs(docs: List[dict]) -> str:
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
-    results = retrieve_documents(query, top_k=5)
+    retrieved = retrieve_documents(query, top_k=5)
+    results = retrieved.get("docs", [])
+    retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
     return {
         "query": query,
@@ -116,6 +118,13 @@ def retrieve_initial(state: RAGState) -> RAGState:
             "retrieved_chunks": results,
             "initial_retrieved_chunks": results,
             "retrieval_stage": "initial",
+            "rerank_enabled": retrieve_meta.get("rerank_enabled"),
+            "rerank_applied": retrieve_meta.get("rerank_applied"),
+            "rerank_model": retrieve_meta.get("rerank_model"),
+            "rerank_endpoint": retrieve_meta.get("rerank_endpoint"),
+            "rerank_error": retrieve_meta.get("rerank_error"),
+            "retrieval_mode": retrieve_meta.get("retrieval_mode"),
+            "candidate_k": retrieve_meta.get("candidate_k"),
         },
     }
 
@@ -200,14 +209,41 @@ def rewrite_question_node(state: RAGState) -> RAGState:
 def retrieve_expanded(state: RAGState) -> RAGState:
     strategy = state.get("expansion_type") or "step_back"
     results: List[dict] = []
+    rerank_applied_any = False
+    rerank_enabled_any = False
+    rerank_model = None
+    rerank_endpoint = None
+    rerank_errors = []
+    retrieval_mode = None
+    candidate_k = None
 
     if strategy in ("hyde", "complex"):
         hypothetical_doc = state.get("hypothetical_doc") or generate_hypothetical_document(state["question"])
-        results.extend(retrieve_documents(hypothetical_doc, top_k=5))
+        retrieved_hyde = retrieve_documents(hypothetical_doc, top_k=5)
+        results.extend(retrieved_hyde.get("docs", []))
+        hyde_meta = retrieved_hyde.get("meta", {})
+        rerank_applied_any = rerank_applied_any or bool(hyde_meta.get("rerank_applied"))
+        rerank_enabled_any = rerank_enabled_any or bool(hyde_meta.get("rerank_enabled"))
+        rerank_model = rerank_model or hyde_meta.get("rerank_model")
+        rerank_endpoint = rerank_endpoint or hyde_meta.get("rerank_endpoint")
+        if hyde_meta.get("rerank_error"):
+            rerank_errors.append(f"hyde:{hyde_meta.get('rerank_error')}")
+        retrieval_mode = retrieval_mode or hyde_meta.get("retrieval_mode")
+        candidate_k = candidate_k or hyde_meta.get("candidate_k")
 
     if strategy in ("step_back", "complex"):
         expanded_query = state.get("expanded_query") or state["question"]
-        results.extend(retrieve_documents(expanded_query, top_k=5))
+        retrieved_stepback = retrieve_documents(expanded_query, top_k=5)
+        results.extend(retrieved_stepback.get("docs", []))
+        step_meta = retrieved_stepback.get("meta", {})
+        rerank_applied_any = rerank_applied_any or bool(step_meta.get("rerank_applied"))
+        rerank_enabled_any = rerank_enabled_any or bool(step_meta.get("rerank_enabled"))
+        rerank_model = rerank_model or step_meta.get("rerank_model")
+        rerank_endpoint = rerank_endpoint or step_meta.get("rerank_endpoint")
+        if step_meta.get("rerank_error"):
+            rerank_errors.append(f"step_back:{step_meta.get('rerank_error')}")
+        retrieval_mode = retrieval_mode or step_meta.get("retrieval_mode")
+        candidate_k = candidate_k or step_meta.get("candidate_k")
 
     deduped = []
     seen = set()
@@ -217,6 +253,11 @@ def retrieve_expanded(state: RAGState) -> RAGState:
             continue
         seen.add(key)
         deduped.append(item)
+
+    # 扩展阶段可能合并了多路召回（如 hyde + step_back），
+    # 这里统一重排展示名次，避免出现 1,2,3,4,5,4,5 这类重复名次。
+    for idx, item in enumerate(deduped, 1):
+        item["rrf_rank"] = idx
 
     context = _format_docs(deduped)
     rag_trace = state.get("rag_trace", {}) or {}
@@ -229,6 +270,13 @@ def retrieve_expanded(state: RAGState) -> RAGState:
         "retrieved_chunks": deduped,
         "expanded_retrieved_chunks": deduped,
         "retrieval_stage": "expanded",
+        "rerank_enabled": rerank_enabled_any,
+        "rerank_applied": rerank_applied_any,
+        "rerank_model": rerank_model,
+        "rerank_endpoint": rerank_endpoint,
+        "rerank_error": "; ".join(rerank_errors) if rerank_errors else None,
+        "retrieval_mode": retrieval_mode,
+        "candidate_k": candidate_k,
     })
     return {"docs": deduped, "context": context, "rag_trace": rag_trace}
 

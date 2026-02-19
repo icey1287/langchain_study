@@ -13,6 +13,7 @@ AMAP_WEATHER_API = os.getenv("AMAP_WEATHER_API")
 AMAP_API_KEY = os.getenv("AMAP_API_KEY")
 
 _LAST_RAG_CONTEXT = None
+_KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
 
 
 def _set_last_rag_context(context: dict):
@@ -27,6 +28,12 @@ def get_last_rag_context(clear: bool = True) -> Optional[dict]:
     if clear:
         _LAST_RAG_CONTEXT = None
     return context
+
+
+def reset_tool_call_guards():
+    """每轮对话开始时重置工具调用计数。"""
+    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
+    _KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
 
 
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
@@ -93,6 +100,14 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
 @tool("search_knowledge_base")
 def search_knowledge_base(query: str) -> str:
     """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
+    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
+    if _KNOWLEDGE_TOOL_CALLS_THIS_TURN >= 1:
+        return (
+            "TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. "
+            "Use the existing retrieval result and provide the final answer directly."
+        )
+    _KNOWLEDGE_TOOL_CALLS_THIS_TURN += 1
+
     try:
         from .rag_pipeline import run_rag_graph
     except ImportError:
@@ -101,12 +116,12 @@ def search_knowledge_base(query: str) -> str:
     rag_result = run_rag_graph(query)
 
     docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
-    if not docs:
-        return "No relevant documents found in the knowledge base."
-
     rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}
     if rag_trace:
         _set_last_rag_context({"rag_trace": rag_trace})
+
+    if not docs:
+        return "No relevant documents found in the knowledge base."
 
     formatted = []
     for i, result in enumerate(docs, 1):

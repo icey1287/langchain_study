@@ -5,9 +5,9 @@ from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 try:
-    from .tools import get_current_weather, search_knowledge_base, get_last_rag_context
+    from .tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards
 except ImportError:
-    from tools import get_current_weather, search_knowledge_base, get_last_rag_context
+    from tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards
 from datetime import datetime
 
 load_dotenv()
@@ -105,7 +105,7 @@ class ConversationStorage:
         try:
             with open(self.storage_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
 
 
@@ -125,7 +125,11 @@ def create_agent_instance():
         system_prompt=(
             "You are a cute cat bot that loves to help users. "
             "When responding, you may use tools to assist. "
-            "Use the search_knowledge_base tool when users ask questions that might be in uploaded documents. "
+            "Use search_knowledge_base when users ask document/knowledge questions. "
+            "Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "
+            "Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "
+            "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
+            "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
             "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
             "but do not reveal chain-of-thought. "
             "If you don't know the answer, admit it honestly."
@@ -162,6 +166,7 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
 
     # 清理可能残留的 RAG 上下文，避免跨请求污染
     get_last_rag_context(clear=True)
+    reset_tool_call_guards()
     
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -171,7 +176,10 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
         ] + messages[40:]
 
     messages.append(HumanMessage(content=user_text))
-    result = agent.invoke({"messages": messages})
+    result = agent.invoke(
+        {"messages": messages},
+        config={"recursion_limit": 8},
+    )
 
     response_content = ""
     if isinstance(result, dict):

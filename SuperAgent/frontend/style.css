@@ -338,6 +338,14 @@ body {
     color: var(--text-light);
 }
 
+.source-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 2px;
+    font-size: 0.78rem;
+}
+
 .source-excerpt {
     margin-top: 4px;
     color: var(--text-color);

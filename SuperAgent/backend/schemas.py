@@ -12,6 +12,9 @@ class RetrievedChunk(BaseModel):
     filename: str
     page_number: Optional[str | int] = None
     text: Optional[str] = None
+    score: Optional[float] = None
+    rrf_rank: Optional[int] = None
+    rerank_score: Optional[float] = None
 
 
 class RagTrace(BaseModel):
@@ -29,6 +32,13 @@ class RagTrace(BaseModel):
     rewrite_needed: Optional[bool] = None
     rewrite_strategy: Optional[str] = None
     rewrite_query: Optional[str] = None
+    rerank_enabled: Optional[bool] = None
+    rerank_applied: Optional[bool] = None
+    rerank_model: Optional[str] = None
+    rerank_endpoint: Optional[str] = None
+    rerank_error: Optional[str] = None
+    retrieval_mode: Optional[str] = None
+    candidate_k: Optional[int] = None
     retrieved_chunks: Optional[List[RetrievedChunk]] = None
     initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
     expanded_retrieved_chunks: Optional[List[RetrievedChunk]] = None

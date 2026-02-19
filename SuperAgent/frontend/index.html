@@ -208,6 +208,24 @@
                                 <div v-if="msg.ragTrace.rewrite_query" class="trace-line">
                                     重写查询：{{ msg.ragTrace.rewrite_query }}
                                 </div>
+                                <div v-if="msg.ragTrace.retrieval_mode" class="trace-line">
+                                    检索模式：{{ msg.ragTrace.retrieval_mode }}
+                                </div>
+                                <div v-if="msg.ragTrace.candidate_k" class="trace-line">
+                                    候选召回数：{{ msg.ragTrace.candidate_k }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_enabled !== null && msg.ragTrace.rerank_enabled !== undefined" class="trace-line">
+                                    Rerank已配置：{{ msg.ragTrace.rerank_enabled ? '是' : '否' }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_applied !== null && msg.ragTrace.rerank_applied !== undefined" class="trace-line">
+                                    Rerank已执行：{{ msg.ragTrace.rerank_applied ? '是' : '否' }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_model" class="trace-line">
+                                    Rerank模型：{{ msg.ragTrace.rerank_model }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_error" class="trace-line">
+                                    Rerank状态：{{ msg.ragTrace.rerank_error }}
+                                </div>
                                 <div v-if="msg.ragTrace.expansion_type" class="trace-line">
                                     扩展策略：{{ msg.ragTrace.expansion_type }}
                                 </div>
@@ -228,6 +246,10 @@
                                                 <span class="source-file">{{ chunk.filename }}</span>
                                                 <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
                                             </div>
+                                            <div class="source-meta-line">
+                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
+                                            </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                         </li>
                                     </ul>
@@ -240,6 +262,10 @@
                                                 <span class="source-file">{{ chunk.filename }}</span>
                                                 <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
                                             </div>
+                                            <div class="source-meta-line">
+                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
+                                            </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                         </li>
                                     </ul>
@@ -251,6 +277,10 @@
                                             <div class="source-title-line">
                                                 <span class="source-file">{{ chunk.filename }}</span>
                                                 <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
+                                            </div>
+                                            <div class="source-meta-line">
+                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                         </li>

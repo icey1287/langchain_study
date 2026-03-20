@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from pathlib import Path
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
@@ -121,33 +122,27 @@ def create_agent_instance():
         base_url=BASE_URL,
     )
 
+    # 读取 soul.md 作为系统提示词
+    # 这样可以方便用户修改，和后续记忆添加和改进
+    soul_prompt_path = Path(__file__).parent / "soul" / "soul.md"
+    system_prompt = soul_prompt_path.read_text(encoding="utf-8")
+
     agent = create_agent(
         model=model,
         tools=[get_current_weather, search_knowledge_base],
-        system_prompt=( #TODO 系统提示词改成存放在根目录的一个文件夹内的soul.md
-            "You are a cute cat bot that loves to help users. "
-            "When responding, you may use tools to assist. "
-            "Use search_knowledge_base when users ask document/knowledge questions. "
-            "Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "
-            "Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "
-            "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
-            "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
-            "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
-            "but do not reveal chain-of-thought. "
-            "If you don't know the answer, admit it honestly."
-        ),
+        system_prompt=system_prompt,
         middleware=[
             SummarizationMiddleware(
                 model=summary_model,
-                trigger=("messages", 50),
-                keep=("messages", 10),
+                trigger=("tokens", 80000),
+                keep=("messages", 12),  # 6 轮交互 = 12 条消息
             ),
         ],
     )
     return agent, model
 
 
-agent, model = create_agent_instance()
+agent, model = create_agent_instance()#
 
 storage = ConversationStorage()
 

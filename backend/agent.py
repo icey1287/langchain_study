@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 import os
 import json
 import asyncio
@@ -7,12 +6,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
 from tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 from datetime import datetime
-
-load_dotenv()
-
-API_KEY = os.getenv("ARK_API_KEY")
-MODEL = os.getenv("MODEL")
-BASE_URL = os.getenv("BASE_URL")
+from config import API_KEY, MODEL, BASE_URL
 
 class ConversationStorage:
     """对话存储"""
@@ -111,7 +105,7 @@ class ConversationStorage:
 def create_agent_instance():
     model = init_chat_model(
         model=MODEL,
-        model_provider="openai",
+        model_provider="openai", #TODO 改一下
         api_key=API_KEY,
         base_url=BASE_URL,
         temperature=0.3,
@@ -121,7 +115,7 @@ def create_agent_instance():
     agent = create_agent(
         model=model,
         tools=[get_current_weather, search_knowledge_base],
-        system_prompt=(
+        system_prompt=( #TODO 系统提示词改成存放在根目录的一个文件夹内的soul.md
             "You are a cute cat bot that loves to help users. "
             "When responding, you may use tools to assist. "
             "Use search_knowledge_base when users ask document/knowledge questions. "
@@ -141,6 +135,7 @@ agent, model = create_agent_instance()
 
 storage = ConversationStorage()
 
+#TODO 这里改为使用Langchain的中间件
 def summarize_old_messages(model, messages: list) -> str:
     """将旧消息总结为摘要"""
     # 提取旧对话

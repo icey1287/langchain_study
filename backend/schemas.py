@@ -1,104 +1,80 @@
-from pydantic import BaseModel
-from typing import Optional, List
+import os
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import SystemMessage, HumanMessage
+from rich.traceback import install
+install()
 
+load_dotenv()
 
-class ChatRequest(BaseModel):
-    message: str
-    user_id: Optional[str] = "default_user"
-    session_id: Optional[str] = "default_session"
+API_KEY=os.getenv("ARK_API_KEY")
+MODEL=os.getenv("MODEL")
+BASE_URL=os.getenv("BASE_URL")
 
+class SmartTranslator:
+    def __init__(self):
+        self.model = init_chat_model(
+            model=MODEL,
+            model_provider="openai",
+            base_url=BASE_URL,
+            api_key=API_KEY,
+            temperature=0.3
+        )
 
-class RetrievedChunk(BaseModel):
-    filename: str
-    page_number: Optional[str | int] = None
-    text: Optional[str] = None
-    score: Optional[float] = None
-    rrf_rank: Optional[int] = None
-    rerank_score: Optional[float] = None
+    def translate(self,text:str,target_lang:str="中文",style:str="正式"):
+        system_prompt = f"""你是一个专业的翻译助手。
 
+          任务：
+          1. 自动检测输入文本的语言
+          2. 翻译成{target_lang}
+          3. 使用{style}风格
+          4. 如果有专业术语，在翻译后用括号标注原文
 
-class RagTrace(BaseModel):
-    tool_used: bool
-    tool_name: str
-    query: Optional[str] = None
-    expanded_query: Optional[str] = None
-    step_back_question: Optional[str] = None
-    step_back_answer: Optional[str] = None
-    expansion_type: Optional[str] = None
-    hypothetical_doc: Optional[str] = None
-    retrieval_stage: Optional[str] = None
-    grade_score: Optional[str] = None
-    grade_route: Optional[str] = None
-    rewrite_needed: Optional[bool] = None
-    rewrite_strategy: Optional[str] = None
-    rewrite_query: Optional[str] = None
-    rerank_enabled: Optional[bool] = None
-    rerank_applied: Optional[bool] = None
-    rerank_model: Optional[str] = None
-    rerank_endpoint: Optional[str] = None
-    rerank_error: Optional[str] = None
-    retrieval_mode: Optional[str] = None
-    candidate_k: Optional[int] = None
-    leaf_retrieve_level: Optional[int] = None
-    auto_merge_enabled: Optional[bool] = None
-    auto_merge_applied: Optional[bool] = None
-    auto_merge_threshold: Optional[int] = None
-    auto_merge_replaced_chunks: Optional[int] = None
-    auto_merge_steps: Optional[int] = None
-    retrieved_chunks: Optional[List[RetrievedChunk]] = None
-    initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
-    expanded_retrieved_chunks: Optional[List[RetrievedChunk]] = None
+          输出格式：
+          【原语言】: xxx
+          【翻译】: xxx
+          【术语解释】: （如果有）
+          """
+        messages=[
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=text)
+        ]
+        response = self.model.invoke(messages)
+        return response.content
+    
+def main():
+    translator=SmartTranslator()
+    print("🌍 智能翻译助手（LangChain 1.0）")
+    print("=" * 50)
 
+    # 示例1：英译中（技术文本）
+    text1 = "LangChain is a framework for developing applications powered by large language models."
+    print(f"\n📝 原文: {text1}")
+    print(f"\n🔄 翻译结果:\n{translator.translate(text1, '中文', '正式')}")
 
-class ChatResponse(BaseModel):
-    response: str
-    rag_trace: Optional[RagTrace] = None
+    print("\n" + "=" * 50)
 
+    # 示例2：中译英（口语风格）
+    text2 = "这个框架真的超级好用，强烈推荐！"
+    print(f"\n📝 原文: {text2}")
+    print(f"\n🔄 翻译结果:\n{translator.translate(text2, '英文', '口语')}")
 
-class MessageInfo(BaseModel):
-    type: str
-    content: str
-    timestamp: str
-    rag_trace: Optional[RagTrace] = None
+    print("\n" + "=" * 50)
 
+    # 交互模式
+    print("\n💬 进入交互模式（输入 'quit' 退出）\n")
+    while True:
+        text = input("请输入要翻译的文本: ")
+        if text.lower() == 'quit':
+            break
 
-class SessionMessagesResponse(BaseModel):
-    messages: List[MessageInfo]
+        target = input("目标语言（默认中文）: ") or "中文"
+        style = input("翻译风格（正式/口语/文学，默认正式）: ") or "正式"
 
+        print(f"\n🔄 翻译中...\n")
+        result = translator.translate(text, target, style)
+        print(result)
+        print("\n" + "-" * 50 + "\n")
 
-class SessionInfo(BaseModel):
-    session_id: str
-    updated_at: str
-    message_count: int
-
-
-class SessionListResponse(BaseModel):
-    sessions: List[SessionInfo]
-
-
-class SessionDeleteResponse(BaseModel):
-    session_id: str
-    message: str
-
-
-class DocumentInfo(BaseModel):
-    filename: str
-    file_type: str
-    chunk_count: int
-    uploaded_at: Optional[str] = None
-
-
-class DocumentListResponse(BaseModel):
-    documents: List[DocumentInfo]
-
-
-class DocumentUploadResponse(BaseModel):
-    filename: str
-    chunks_processed: int
-    message: str
-
-
-class DocumentDeleteResponse(BaseModel):
-    filename: str
-    chunks_deleted: int
-    message: str
+if __name__ == "__main__":
+    main()

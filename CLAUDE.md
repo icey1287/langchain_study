@@ -66,7 +66,7 @@ SuperMew/
 
 ## 核心模块
 
-- **RAG 管道** (`rag_pipeline.py`)：基于 LangGraph 构建，包含 retrieve → grade → rewrite → retrieve_expanded 节点
+- **RAG 管道** (`rag_pipeline.py`)：基于 LangGraph 构建，包含 retrieve → grade → rewrite → retrieve\_expanded 节点
 - **检索** (`rag_utils.py`)：Hybrid Search (Dense + Sparse + RRF) + Jina Rerank
 - **分块** (`document_loader.py`)：三级滑动窗口（L1/L2/L3），仅 L3 叶子块写入 Milvus
 - **记忆** (`agent.py`)：
@@ -77,6 +77,8 @@ SuperMew/
 ## 优化方向
 
 优先优化**上下文工程**和**记忆系统**：
+
 - 改进会话摘要策略
 - 考虑集成 Mem0/LangMem 等外部记忆方案
 - 优化上下文压缩和注入方式 -- Context Engineering
+

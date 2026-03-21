@@ -21,6 +21,8 @@ dependencies = [
     "langgraph>=0.2.31",
     "pypdf>=4.3.1",
     "docx2txt>=0.8",
+    "langgraph-checkpoint-postgres[psycopg]>=3.0.5",
+    "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]
